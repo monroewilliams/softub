@@ -300,9 +300,8 @@ void setup()
   enter_state(runstate_startup);
 }
 
-void loop() {
-  uint32_t loop_start_time = micros();
-  
+void check_temp_validity()
+{
   // Temperature readings are meaningless if the pump isn't running.
   // We also want to ignore temp readings when the pump was just turned on,
   // and consider the temp valid for a short time after it turns off.
@@ -322,46 +321,54 @@ void loop() {
       temp_valid = false;
     }
   }
+}
 
-  // Always take sensor readings. The temp_valid flag just determines whether we ignore them.
+void read_temp_sensors()
+{
+  int avg_reading = 0;
+  for (int i = 0; i < pin_temp_count; i++)
   {
-    int avg_reading = 0;
-    for (int i = 0; i < pin_temp_count; i++)
-    {
-      int value = analogRead(pin_temp[i]);
+    int value = analogRead(pin_temp[i]);
 
-      // Save the current sample in the ring buffer
-      temp_samples[i][temp_sample_pointer] = value;
+    // Save the current sample in the ring buffer
+    temp_samples[i][temp_sample_pointer] = value;
 
-      // Smooth the temperature sampling over temp_sample_count samples
-      int smoothed_value = 0;
-      for (int j = 0; j < temp_sample_count; j++) {
-        smoothed_value += temp_samples[i][j];
-      }
-      smoothed_value /= temp_sample_count;
-      avg_reading += smoothed_value;
-
-      print_oled(i + 1, "%d: %d (%d)", i, temp_to_farenheit(smoothed_value), smoothed_value);
+    // Smooth the temperature sampling over temp_sample_count samples
+    int smoothed_value = 0;
+    for (int j = 0; j < temp_sample_count; j++) {
+      smoothed_value += temp_samples[i][j];
     }
+    smoothed_value /= temp_sample_count;
+    avg_reading += smoothed_value;
 
-    // Calculate the average smoothed temp and save it.
-    avg_reading /= pin_temp_count;
-    last_temp = temp_to_farenheit(avg_reading);
-
-    // If the current raw samples from sensors 0 and 1 differ by more than panic_sensor_difference, panic.
-    if (abs(temp_samples[0][temp_sample_pointer] - temp_samples[1][temp_sample_pointer]) > panic_sensor_difference)
-    {
-        enter_state(runstate_panic);
-    }
-    
-    // Advance the sample pointer in the ring buffer.
-    temp_sample_pointer++;
-    if (temp_sample_pointer >= temp_sample_count) {
-      temp_sample_pointer = 0;
-    }
+    print_oled(i + 1, "%d: %d (%d)", i, temp_to_farenheit(smoothed_value), smoothed_value);
   }
 
-  // Read buttons
+  // Calculate the average smoothed temp and save it.
+  avg_reading /= pin_temp_count;
+  last_temp = temp_to_farenheit(avg_reading);
+
+  // If the current raw samples from sensors 0 and 1 differ by more than panic_sensor_difference, panic.
+  if (abs(temp_samples[0][temp_sample_pointer] - temp_samples[1][temp_sample_pointer]) > panic_sensor_difference)
+  {
+    enter_state(runstate_panic);
+  }
+  
+  // If calculated temperature is over our defined limit, panic.
+  if (last_temp > panic_high_temp) 
+  {
+    enter_state(runstate_panic);
+  }
+
+  // Advance the sample pointer in the ring buffer.
+  temp_sample_pointer++;
+  if (temp_sample_pointer >= temp_sample_count) {
+    temp_sample_pointer = 0;
+  }
+}
+
+void read_buttons()
+{
   while (Serial1.available()) {
     int raw = Serial1.read();
     // The 4 button bits are replicated and inverted between the low and high nybbles.
@@ -371,6 +378,16 @@ void loop() {
       buttons = raw >> 4;
     }
   }
+}
+
+void loop() {
+  uint32_t loop_start_time = micros();
+  
+  read_temp_sensors();
+
+  read_buttons();
+
+  check_temp_validity();
 
   uint32_t millis_since_last_transition = (millis() - runstate_last_transition_millis);
   uint32_t seconds_since_last_transition = millis_since_last_transition / 1000l;
