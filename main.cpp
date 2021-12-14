@@ -1,11 +1,41 @@
 #include <Arduino.h>
 
 //////////////////////////////////////////////////
+// Feature defines
+#define OLED_DISPLAY 1
+
+#ifdef OLED_DISPLAY
+#include <U8x8lib.h>
+
+U8X8_SH1106_128X64_NONAME_4W_HW_SPI oled(/* cs=*/ 7, /* dc=*/ 6 , /*reset=*/ 5);
+
+#define OLED_FONT u8x8_font_8x13_1x2_f
+const int oled_line_height = 13;
+
+void print_oled(int line, const char *format, ...)
+{
+  const int width = 15;
+  char string[width + 1];
+  va_list arg;
+  va_start(arg, format);
+  vsnprintf(string, sizeof(string), format, arg);
+
+  // pad the remainder of the string with spaces, so it clears any previous text.
+  strlcat(string , "                      ", sizeof(string));
+
+  oled.drawString(0, line * 2, string);
+}
+#else // !OLED_DISPLAY
+// Turn these into no-ops.
+#define print_oled(...)
+#endif
+
+//////////////////////////////////////////////////
 // board-specific defines
 #if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_LEONARDO)
 // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
 const int pin_pump = 2;
-const int pin_temp[] = { A0 };
+const int pin_temp[] = { A0, A1 };
 #endif
 
 //////////////////////////////////////////////////
@@ -23,6 +53,9 @@ enum
   // The pump was turned on manually. Run it for 10 minutes.
   runstate_manual_pump,
 
+  // for testing
+  runstate_test,
+
   // Go to this state if we detect a problem with the temperature sensors. 
   // It shuts down the pump and sets the display into a "help me" state.
   // The user can reset to startup mode by holding the "light" and "jets" buttons for 5 seconds.
@@ -36,8 +69,6 @@ uint32_t runstate_last_transition_millis = 0;
 
 // The last valid temperature reading we took
 int last_temp = 0;
-// The millis timestamp when the last_temp was taken
-uint32_t last_known_temp_millis = 0;
 
 // Used to display temperature for a short time after the user adjusts it
 bool temp_adjusted = false;
@@ -63,7 +94,11 @@ bool panic_flash;
 /////////////////////////////////////////////////
 // other globals
 const int pin_temp_count = sizeof(pin_temp) / sizeof(pin_temp[0]);
-int last_temps[pin_temp_count];
+
+// smooth the temperature sampling over this many samples, to filter out noise.
+const int temp_sample_count = 16;
+int temp_sample_pointer = 0;
+int temp_samples[pin_temp_count][temp_sample_count];
 
 // Start out the display bytes with a sane value.
 uint8_t display_buffer[] = { 0x02, 0x00, 0x01, 0x00, 0x00, 0x01, 0xFF};
@@ -101,6 +136,15 @@ void enter_state(int state)
 {
   runstate = state;
   runstate_transition();
+  switch(state) {
+    case runstate_startup:       print_oled(0, "startup"); break;
+    case runstate_idle:          print_oled(0, "idle"); break;
+    case runstate_finding_temp:  print_oled(0, "finding temp"); break;
+    case runstate_heating:       print_oled(0, "heating"); break;
+    case runstate_manual_pump:   print_oled(0, "manual"); break;
+    case runstate_test:          print_oled(0, "test"); break;
+    case runstate_panic:         print_oled(0, "panic"); break;
+  }
 }
 
 void display_update_checksum()
@@ -218,6 +262,11 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(pin_pump, OUTPUT);
   
+#ifdef OLED_DISPLAY
+  oled.begin();
+  oled.setFont(OLED_FONT);
+#endif
+
   enter_state(runstate_startup);
 }
 
@@ -244,26 +293,42 @@ void loop() {
     }
   }
 
-  if (temp_valid)
+  // Always take sensor readings. The temp_valid flag just determines whether we ignore them.
   {
-    // The readings from the temperature sensors should be valid.
     int avg_temp = 0;
     for (int i = 0; i < pin_temp_count; i++)
     {
-      int value = analogRead(pin_temp[i]);    
-      avg_temp += value;
-      if (value != last_temps[i])
-      {
-        last_temps[i] = value;
-        Serial.print(F("Temp for sensor #"));
-        Serial.print(i);
-        Serial.print(F(" changed to "));
-        Serial.println(value);
+      int value = analogRead(pin_temp[i]);
+
+      // Save the current sample in the ring buffer
+      temp_samples[i][temp_sample_pointer] = value;
+
+      // Smooth the temperature sampling over temp_sample_count samples
+      int smoothed_value = 0;
+      for (int j = 0; j < temp_sample_count; j++) {
+        smoothed_value += temp_samples[i][j];
       }
+      smoothed_value /= temp_sample_count;
+      avg_temp += smoothed_value;
+
+      print_oled(i + 1, "%d: %d (%d)", i, smoothed_value, value);
     }
-    // FIXME: check for disagreement in the temp readings and panic if sensors diverged too far
-    last_temp = avg_temp / pin_temp_count;
-    last_known_temp_millis = millis();
+
+    // Calculate the average smoothed temp and save it.
+    avg_temp /= pin_temp_count;
+    last_temp = avg_temp;
+
+    // If the current samples from sensors 0 and 1 differ by more than 20, panic.
+    if (abs(temp_samples[0][temp_sample_pointer] - temp_samples[1][temp_sample_pointer]) > 20)
+    {
+        enter_state(runstate_panic);
+    }
+
+    // Advance the sample pointer in the ring buffer.
+    temp_sample_pointer++;
+    if (temp_sample_pointer >= temp_sample_count) {
+      temp_sample_pointer = 0;
+    }
 
     // HACK: for now, pretend the temp is always 95.
     last_temp = 95;
@@ -282,7 +347,8 @@ void loop() {
 
   uint32_t millis_since_last_transition = (millis() - runstate_last_transition_millis);
   uint32_t seconds_since_last_transition = millis_since_last_transition / 1000l;
-  bool jets_toggled = false;
+  bool jets_pushed = false;
+  bool lights_pushed = false;
 
   if (last_buttons != buttons)
   {
@@ -295,7 +361,7 @@ void loop() {
       if (!(last_buttons & button_jets) && (buttons & button_jets))
       {
         // Jets button was pushed.
-        jets_toggled = true;
+        jets_pushed = true;
       }
 
       if (!(last_buttons & button_up) && (buttons & button_up))
@@ -320,9 +386,7 @@ void loop() {
 
       if (!(last_buttons & button_light) && (buttons & button_light))
       {
-        // Light button was pushed.
-        // TESTING: go into panic state
-        enter_state(runstate_panic);
+        lights_pushed = true;
       }
     } else {
       // When in panic state, the only thing we do is look for the jets and lights buttons to be held down together.
@@ -351,6 +415,12 @@ void loop() {
 
   // In most states, we want the heating light off.
   display_heat(false);
+
+  // Pushing the lights button at any time immediately enters the test state.
+  // if (runstate != runstate_test && lights_pushed) {
+  //   enter_state(runstate_test);
+  //   lights_pushed = false;
+  // }
 
   switch(runstate) {
     case runstate_startup:
@@ -384,7 +454,7 @@ void loop() {
     break;
     case runstate_idle:
       set_pump(false);
-      if (jets_toggled)
+      if (jets_pushed)
       {
         // From the idle state, allow the user to turn on the pump manually.
         enter_state(runstate_manual_pump);
@@ -407,11 +477,23 @@ void loop() {
     break;
     case runstate_manual_pump:
       set_pump(true);
-      if (jets_toggled)
+      if (jets_pushed)
       {
         // From the manual state, allow the user to turn off the pump.
         enter_state(runstate_idle);
       }
+    break;
+    case runstate_test:
+    {
+      if (lights_pushed)
+      {
+        // Exit the test state
+        enter_state(runstate_finding_temp);
+        print_oled(3, "");
+      } else {
+        print_oled(3, "012345678901234567890");
+      }
+    }
     break;
     case runstate_panic:
       set_pump(false);
