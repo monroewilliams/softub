@@ -87,6 +87,10 @@ const uint32_t idle_seconds = 1 * 60 * 60;
 const uint32_t manual_pump_seconds = 60 * 10;
 // The amount of time the user has to hold buttons to escape panic state
 const uint32_t panic_wait_seconds = 5;
+// If sensor readings ever disagree by this much, panic.
+const int panic_sensor_difference = 20;
+// If the temperature reading ever exceeds this, panic.
+const int panic_high_temp = 108;
 
 // Used to flash things in panic mode
 bool panic_flash;
@@ -126,6 +130,32 @@ enum {
   button_down = 0x08,
 };
 
+// FIXME: These are not actually calibrated yet.
+const int temp_table[][2] = 
+{
+  { 0, 0 },
+  { 140, 72 }, 
+  { 180, 90 },
+  { INT16_MAX, INT16_MAX }
+};
+
+const int temp_table_size = sizeof(temp_table) / sizeof(temp_table[0]);
+
+int temp_to_farenheit(int reading)
+{
+  for (int i = 1; i < temp_table_size; i++)
+  {
+    if (reading < temp_table[i][0]) {
+      // Linear interpolate between entries in the table.
+      long raw = reading - temp_table[i-1][0];
+      long raw_segment = temp_table[i][0] - temp_table[i-1][0];
+      long degrees_segment = temp_table[i][1] - temp_table[i-1][1];
+      return ((raw * degrees_segment) / raw_segment) + temp_table[i-1][1];
+    }
+  }
+
+  return INT16_MAX;
+}
 
 void runstate_transition()
 {
@@ -295,7 +325,7 @@ void loop() {
 
   // Always take sensor readings. The temp_valid flag just determines whether we ignore them.
   {
-    int avg_temp = 0;
+    int avg_reading = 0;
     for (int i = 0; i < pin_temp_count; i++)
     {
       int value = analogRead(pin_temp[i]);
@@ -309,29 +339,26 @@ void loop() {
         smoothed_value += temp_samples[i][j];
       }
       smoothed_value /= temp_sample_count;
-      avg_temp += smoothed_value;
+      avg_reading += smoothed_value;
 
-      print_oled(i + 1, "%d: %d (%d)", i, smoothed_value, value);
+      print_oled(i + 1, "%d: %d (%d)", i, temp_to_farenheit(smoothed_value), smoothed_value);
     }
 
     // Calculate the average smoothed temp and save it.
-    avg_temp /= pin_temp_count;
-    last_temp = avg_temp;
+    avg_reading /= pin_temp_count;
+    last_temp = temp_to_farenheit(avg_reading);
 
-    // If the current samples from sensors 0 and 1 differ by more than 20, panic.
-    if (abs(temp_samples[0][temp_sample_pointer] - temp_samples[1][temp_sample_pointer]) > 20)
+    // If the current raw samples from sensors 0 and 1 differ by more than panic_sensor_difference, panic.
+    if (abs(temp_samples[0][temp_sample_pointer] - temp_samples[1][temp_sample_pointer]) > panic_sensor_difference)
     {
         enter_state(runstate_panic);
     }
-
+    
     // Advance the sample pointer in the ring buffer.
     temp_sample_pointer++;
     if (temp_sample_pointer >= temp_sample_count) {
       temp_sample_pointer = 0;
     }
-
-    // HACK: for now, pretend the temp is always 95.
-    last_temp = 95;
   }
 
   // Read buttons
