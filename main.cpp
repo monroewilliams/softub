@@ -166,7 +166,7 @@ bool panic_flash;
 const int pin_temp_count = sizeof(pin_temp) / sizeof(pin_temp[0]);
 
 // smooth the temperature sampling over this many samples, to filter out noise.
-const int temp_sample_count = 16;
+const int temp_sample_count = 256;
 int temp_sample_pointer = 0;
 int temp_samples[pin_temp_count][temp_sample_count];
 
@@ -175,8 +175,8 @@ uint8_t display_buffer[] = { 0x02, 0x00, 0x01, 0x00, 0x00, 0x01, 0xFF};
 const int32_t display_bytes = sizeof(display_buffer) / sizeof(display_buffer[0]); 
 bool display_dirty = true;
 
-// loop no faster than 10Hz
-const uint32_t loop_microseconds = 1000000l / 10;
+// loop no faster than 30Hz
+const uint32_t loop_microseconds = 1000000l / 30;
 
 uint32_t buttons = 0;
 uint32_t last_buttons = 0;
@@ -250,7 +250,7 @@ void enter_state(int state)
   runstate_transition();
 
 #ifdef OLED_DISPLAY
-  char *name = "UNKNOWN";
+  const char *name = "UNKNOWN";
   switch(state) {
     case runstate_startup:       name = "startup"; break;
     case runstate_idle:          name = "idle"; break;
