@@ -1,16 +1,76 @@
 #include <Arduino.h>
 
 //////////////////////////////////////////////////
+// board-specific defines
+#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_LEONARDO)
+  // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
+  const int pin_pump = 2;
+  const int pin_temp[] = { A0, A1 };
+
+  const int OLED_CS = 7;
+  const int OLED_DC = 6;
+  const int OLED_RESET = 5;
+#endif
+
+//////////////////////////////////////////////////
 // Feature defines
+// #define SERIAL_DEBUG 1
 #define OLED_DISPLAY 1
+
+#ifdef SERIAL_DEBUG
+  void debug(const char *format, ...)
+  {
+    char string[256];
+    va_list arg;
+    va_start(arg, format);
+    vsnprintf(string, sizeof(string), format, arg);
+
+    Serial.println(string);
+  }
+  void serial_debug_init()
+  {
+    // delay(3000);
+    Serial.begin(9600);
+    // while (!Serial);
+
+    debug("Serial initialized");
+    // delay(100);
+  }
+#else
+  #define serial_debug_init(...)
+  #define debug(...)
+#endif
+
 
 #ifdef OLED_DISPLAY
 #include <U8x8lib.h>
 
-U8X8_SH1106_128X64_NONAME_4W_HW_SPI oled(/* cs=*/ 7, /* dc=*/ 6 , /*reset=*/ 5);
+#if defined(ARDUINO_AVR_LEONARDO)
+  // SCK and MOSI are only available in inconvenient locations on the Leonardo (on the ISCP header). 
+  // Use SW SPI for this case.
+  
+  // These are the same pin assignments that the Uno used for its hardware SPI pins, for shield compatibility.
+  const int OLED_CLOCK = 13;
+  const int OLED_MOSI = 11;
 
-#define OLED_FONT u8x8_font_8x13_1x2_f
-const int oled_line_height = 13;
+  // https://www.amazon.com/gp/product/B01N1LZT8L
+  U8X8_SH1106_128X64_NONAME_4W_SW_SPI oled(OLED_CLOCK, OLED_MOSI, OLED_CS, OLED_DC , OLED_RESET);
+#else
+  // Use hardware SPI
+
+  // https://www.amazon.com/gp/product/B01N1LZT8L
+  U8X8_SH1106_128X64_NONAME_4W_HW_SPI oled(OLED_CS, OLED_DC , OLED_RESET);
+#endif
+
+// Other possibilities:
+// U8X8_SSD1306_128X64_NONAME_4W_HW_SPI oled(OLED_CS, OLED_DC , OLED_RESET);
+// U8X8_SSD1306_128X64_NONAME_2ND_4W_HW_SPI oled(OLED_CS, OLED_DC , OLED_RESET);
+
+void start_oled()
+{
+  oled.begin();
+  oled.setFont(u8x8_font_8x13_1x2_f);
+}
 
 void print_oled(int line, const char *format, ...)
 {
@@ -20,22 +80,18 @@ void print_oled(int line, const char *format, ...)
   va_start(arg, format);
   vsnprintf(string, sizeof(string), format, arg);
 
-  // pad the remainder of the string with spaces, so it clears any previous text.
+  // pad the remainder of the string with spaces, so it clears any previous text on this line.
   strlcat(string , "                      ", sizeof(string));
 
   oled.drawString(0, line * 2, string);
 }
-#else // !OLED_DISPLAY
-// Turn these into no-ops.
-#define print_oled(...)
-#endif
 
-//////////////////////////////////////////////////
-// board-specific defines
-#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_LEONARDO)
-// The I/O for the panel must be connected to the Serial1 pins (0 and 1).
-const int pin_pump = 2;
-const int pin_temp[] = { A0, A1 };
+#else // !OLED_DISPLAY
+
+// Turn these into no-ops.
+#define start_oled(...)
+#define print_oled(...)
+
 #endif
 
 //////////////////////////////////////////////////
@@ -67,6 +123,9 @@ int runstate = runstate_startup;
 // The time of the last transition. This may be used differently by different states.
 uint32_t runstate_last_transition_millis = 0;
 
+// The time of the last change to buttons pressed. This may be used differently by different states.
+uint32_t buttons_last_transition_millis = 0;
+
 // The last valid temperature reading we took
 int last_temp = 0;
 
@@ -87,9 +146,9 @@ const uint32_t idle_seconds = 1 * 60 * 60;
 const uint32_t manual_pump_seconds = 60 * 10;
 // The amount of time the user has to hold buttons to escape panic state
 const uint32_t panic_wait_seconds = 5;
-// If sensor readings ever disagree by this much, panic.
-const int panic_sensor_difference = 20;
-// If the temperature reading ever exceeds this, panic.
+// If smoothed readings ever disagree by this many degrees f, panic.
+const int panic_sensor_difference = 15;
+// If the temperature reading ever exceeds this many degrees f, panic.
 const int panic_high_temp = 108;
 
 // Used to flash things in panic mode
@@ -129,6 +188,17 @@ enum {
   button_up = 0x04,
   button_down = 0x08,
 };
+
+void temp_adjust(int amount)
+{
+  temp_setting += amount;
+  if (temp_setting > temp_max)
+    temp_setting = temp_max;
+  if (temp_setting < temp_min)
+    temp_setting = temp_min;
+  temp_adjusted = true;
+  temp_adjusted_millis = millis();  
+}
 
 // FIXME: These are not actually calibrated yet.
 const int temp_table[][2] = 
@@ -174,6 +244,77 @@ void enter_state(int state)
     case runstate_manual_pump:   print_oled(0, "manual"); break;
     case runstate_test:          print_oled(0, "test"); break;
     case runstate_panic:         print_oled(0, "panic"); break;
+  }
+}
+
+void panic()
+{
+  if (runstate != runstate_panic) {
+    enter_state(runstate_panic);
+  }
+}
+
+int smoothed_sensor_reading(int sensor)
+{
+    int result = 0;
+    for (int i = 0; i < temp_sample_count; i++) {
+      result += temp_samples[sensor][i];
+    }
+    result /= temp_sample_count;
+
+    return result;
+}
+
+void read_temp_sensors()
+{
+  int avg_reading = 0;
+  for (int i = 0; i < pin_temp_count; i++)
+  {
+    int value = analogRead(pin_temp[i]);
+
+    // Save the current sample in the ring buffer
+    temp_samples[i][temp_sample_pointer] = value;
+
+    // Smooth the temperature sampling over temp_sample_count samples
+    int smoothed_value = smoothed_sensor_reading(i);
+    avg_reading += smoothed_value;
+
+    print_oled(i + 1, "%d: %d (%d)", i, temp_to_farenheit(smoothed_value), smoothed_value);
+  }
+
+  // Calculate the average smoothed temp and save it.
+  avg_reading /= pin_temp_count;
+  last_temp = temp_to_farenheit(avg_reading);
+
+  // If the smoothed readings from sensors 0 and 1 ever differ by more than panic_sensor_difference degrees, panic.
+  if (abs(temp_to_farenheit(smoothed_sensor_reading(0)) - temp_to_farenheit(smoothed_sensor_reading(1))) > panic_sensor_difference)
+  {
+    panic();
+  }
+  
+  // If calculated temperature is over our defined limit, panic.
+  if (last_temp > panic_high_temp) 
+  {
+    panic();
+  }
+
+  // Advance the sample pointer in the ring buffer.
+  temp_sample_pointer++;
+  if (temp_sample_pointer >= temp_sample_count) {
+    temp_sample_pointer = 0;
+  }
+}
+
+void read_buttons()
+{
+  while (Serial1.available()) {
+    int raw = Serial1.read();
+    // The 4 button bits are replicated and inverted between the low and high nybbles.
+    // Check that they match, and extract just one copy.
+    if ((raw & 0x0F) == (((raw >> 4) & 0x0F) ^ 0x0F))
+    {
+      buttons = raw >> 4;
+    }
   }
 }
 
@@ -242,9 +383,9 @@ void display_temperature(int temp)
 
 void display_panic()
 {
-  display_set_digits(panic_flash?0x0b:0x0a, 0x0a, panic_flash?0x0a:0x0b);
-  display_filter(panic_flash);
+  display_temperature(temp_to_farenheit(smoothed_sensor_reading(panic_flash?0:1)));
   display_heat(!panic_flash);
+  display_filter(panic_flash);
 }
 
 void display_panic_countdown(int countdown)
@@ -270,7 +411,6 @@ void set_pump(bool running)
   if (pump_running != running)
   {
     display_filter(running);
-    digitalWrite(LED_BUILTIN, running);
     digitalWrite(pin_pump, running);
     pump_running = running;
     pump_switch_millis = millis();
@@ -279,23 +419,14 @@ void set_pump(bool running)
 
 void setup() 
 {
-  // delay(3000);
-  Serial.begin(9600);
-  // while (!Serial);
+  serial_debug_init();
 
   // Communications with the control panel is 2400 baud ttl serial.
   Serial1.begin(2400);
 
-  // Serial.println(F("Serial initialized"));
-  // delay(100);
-
-  pinMode(LED_BUILTIN, OUTPUT);
   pinMode(pin_pump, OUTPUT);
   
-#ifdef OLED_DISPLAY
-  oled.begin();
-  oled.setFont(OLED_FONT);
-#endif
+  start_oled();
 
   enter_state(runstate_startup);
 }
@@ -323,65 +454,10 @@ void check_temp_validity()
   }
 }
 
-void read_temp_sensors()
-{
-  int avg_reading = 0;
-  for (int i = 0; i < pin_temp_count; i++)
-  {
-    int value = analogRead(pin_temp[i]);
-
-    // Save the current sample in the ring buffer
-    temp_samples[i][temp_sample_pointer] = value;
-
-    // Smooth the temperature sampling over temp_sample_count samples
-    int smoothed_value = 0;
-    for (int j = 0; j < temp_sample_count; j++) {
-      smoothed_value += temp_samples[i][j];
-    }
-    smoothed_value /= temp_sample_count;
-    avg_reading += smoothed_value;
-
-    print_oled(i + 1, "%d: %d (%d)", i, temp_to_farenheit(smoothed_value), smoothed_value);
-  }
-
-  // Calculate the average smoothed temp and save it.
-  avg_reading /= pin_temp_count;
-  last_temp = temp_to_farenheit(avg_reading);
-
-  // If the current raw samples from sensors 0 and 1 differ by more than panic_sensor_difference, panic.
-  if (abs(temp_samples[0][temp_sample_pointer] - temp_samples[1][temp_sample_pointer]) > panic_sensor_difference)
-  {
-    enter_state(runstate_panic);
-  }
-  
-  // If calculated temperature is over our defined limit, panic.
-  if (last_temp > panic_high_temp) 
-  {
-    enter_state(runstate_panic);
-  }
-
-  // Advance the sample pointer in the ring buffer.
-  temp_sample_pointer++;
-  if (temp_sample_pointer >= temp_sample_count) {
-    temp_sample_pointer = 0;
-  }
-}
-
-void read_buttons()
-{
-  while (Serial1.available()) {
-    int raw = Serial1.read();
-    // The 4 button bits are replicated and inverted between the low and high nybbles.
-    // Check that they match, and extract just one copy.
-    if ((raw & 0x0F) == (((raw >> 4) & 0x0F) ^ 0x0F))
-    {
-      buttons = raw >> 4;
-    }
-  }
-}
 
 void loop() {
-  uint32_t loop_start_time = micros();
+  uint32_t loop_start_micros = micros();
+  uint32_t loop_start_millis = millis();
   
   read_temp_sensors();
 
@@ -389,16 +465,14 @@ void loop() {
 
   check_temp_validity();
 
-  uint32_t millis_since_last_transition = (millis() - runstate_last_transition_millis);
-  uint32_t seconds_since_last_transition = millis_since_last_transition / 1000l;
   bool jets_pushed = false;
   bool lights_pushed = false;
 
   if (last_buttons != buttons)
   {
     // One or more buttons changed.
-    // Serial.print(F("Buttons changed to "));
-    // Serial.println(buttons, BIN);
+    buttons_last_transition_millis = loop_start_millis;
+    debug("Buttons changed to 0x%02x, buttons_last_transition_millis = %ld", int(buttons), buttons_last_transition_millis);
 
     if (runstate != runstate_panic)
     {
@@ -411,21 +485,13 @@ void loop() {
       if (!(last_buttons & button_up) && (buttons & button_up))
       {
         // Up button was pushed.
-        if (temp_setting < temp_max) {
-          temp_setting++;
-          temp_adjusted = true;
-          temp_adjusted_millis = millis();
-        }
+        temp_adjust(1);
       }
 
       if (!(last_buttons & button_down) && (buttons & button_down))
       {
         // Down button was pushed.
-        if (temp_setting > temp_min) {
-          temp_setting--;
-          temp_adjusted = true;
-          temp_adjusted_millis = millis();
-        }
+        temp_adjust(-1);
       }
 
       if (!(last_buttons & button_light) && (buttons & button_light))
@@ -441,13 +507,43 @@ void loop() {
     last_buttons = buttons;
   }
 
+  // Useful timing shortcuts for the state machine
+  uint32_t millis_since_last_transition = loop_start_millis - runstate_last_transition_millis;
+  uint32_t seconds_since_last_transition = millis_since_last_transition / 1000l;
+  uint32_t millis_since_button_change = loop_start_millis - buttons_last_transition_millis;
+  uint32_t seconds_since_button_change = millis_since_button_change / 1000l;
+
   if (temp_adjusted)
   {
+    uint32_t millis_since_temp_adjust = millis() - temp_adjusted_millis;
+
     // See if the temp-adjusted display window has expired.
-    if (millis() - temp_adjusted_millis > temp_adjusted_display_millis)
+    if (millis_since_temp_adjust  > temp_adjusted_display_millis)
     {
       temp_adjusted = false;
     }
+    else
+    {
+      if (((buttons == button_up) || (buttons == button_down)) &&
+          (millis_since_temp_adjust <= millis_since_button_change))
+      {
+        // If the user has been holding down the up or down button since the last temp adjustment,
+        // and the last temp adjustment was over the repeat time (1/2s for the first adjustment, 1/4s for the next 1.5 seconds, 1/10s thereafter), 
+        // adjust again.
+        uint32_t repeat_time = 500;
+        if (millis_since_button_change > 2000) {
+          repeat_time = 100;
+        } else if (millis_since_button_change > 500) {
+          repeat_time = 250;
+        }
+
+        if (millis_since_temp_adjust >= repeat_time)
+        {
+          temp_adjust((buttons == button_up)?1:-1);
+        }
+      }
+    }
+
   }
 
   // Default to displaying the current temp if it's valid and not recently adjusted, or the set point otherwise.
@@ -465,7 +561,7 @@ void loop() {
   //   enter_state(runstate_test);
   //   lights_pushed = false;
   // }
-
+  
   switch(runstate) {
     case runstate_startup:
         display_set_digits(0x0a, 0x00, 0x0a);
@@ -544,12 +640,12 @@ void loop() {
       if (buttons == (button_jets | button_light))
       {
         // User is holding down the button combo. 
-        if (seconds_since_last_transition >= panic_wait_seconds)
+        if (seconds_since_button_change >= panic_wait_seconds)
         {
           // They've successfully escaped.
           enter_state(runstate_startup);
         } else {
-          display_panic_countdown(panic_wait_seconds -  seconds_since_last_transition);
+          display_panic_countdown(panic_wait_seconds -  seconds_since_button_change);
         }
       }
       else
@@ -567,7 +663,7 @@ void loop() {
 
   display_send();
 
-  uint32_t loop_time = micros() - loop_start_time;
+  uint32_t loop_time = micros() - loop_start_micros;
   if (loop_time < loop_microseconds)
   {
     uint32_t msRemaining = loop_microseconds - loop_time;
