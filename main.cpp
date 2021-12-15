@@ -10,7 +10,14 @@
   const int OLED_CS = 7;
   const int OLED_DC = 6;
   const int OLED_RESET = 5;
+
+  // Values for the ADC in the AVR.
+  const int ADC_MAX = 1024;
+  const double ADC_VREF = 5.0;
+
 #endif
+
+const double ADC_DIVISOR = ADC_VREF / double(ADC_MAX);
 
 //////////////////////////////////////////////////
 // Feature defines
@@ -74,7 +81,7 @@ void start_oled()
 
 void print_oled(int line, const char *format, ...)
 {
-  const int width = 15;
+  const int width = 16;
   char string[width + 1];
   va_list arg;
   va_start(arg, format);
@@ -127,7 +134,7 @@ uint32_t runstate_last_transition_millis = 0;
 uint32_t buttons_last_transition_millis = 0;
 
 // The last valid temperature reading we took
-int last_temp = 0;
+double last_temp = 0;
 
 // Used to display temperature for a short time after the user adjusts it
 bool temp_adjusted = false;
@@ -201,30 +208,35 @@ void temp_adjust(int amount)
 }
 
 // FIXME: These are not actually calibrated yet.
-const int temp_table[][2] = 
+// Left column is in volts, right column is degrees F
+const double temp_table[][2] = 
 {
   { 0, 0 },
-  { 140, 72 }, 
-  { 180, 90 },
-  { INT16_MAX, INT16_MAX }
+  { 140 * ADC_DIVISOR, 72 }, 
+  { 180 * ADC_DIVISOR, 90 },
+  { ADC_VREF, 1000 }
 };
 
 const int temp_table_size = sizeof(temp_table) / sizeof(temp_table[0]);
 
-int temp_to_farenheit(int reading)
+double temp_to_farenheit(double reading)
 {
+  // Scale the reading to voltage
+  reading *= ADC_DIVISOR;
+
   for (int i = 1; i < temp_table_size; i++)
   {
     if (reading < temp_table[i][0]) {
       // Linear interpolate between entries in the table.
-      long raw = reading - temp_table[i-1][0];
-      long raw_segment = temp_table[i][0] - temp_table[i-1][0];
-      long degrees_segment = temp_table[i][1] - temp_table[i-1][1];
+      double raw = reading - temp_table[i-1][0];
+      double raw_segment = temp_table[i][0] - temp_table[i-1][0];
+      double degrees_segment = temp_table[i][1] - temp_table[i-1][1];
       return ((raw * degrees_segment) / raw_segment) + temp_table[i-1][1];
     }
   }
 
-  return INT16_MAX;
+  // Return a value which will definitely cause a panic.
+  return 1000.0;
 }
 
 void runstate_transition()
@@ -236,15 +248,20 @@ void enter_state(int state)
 {
   runstate = state;
   runstate_transition();
+
+#ifdef OLED_DISPLAY
+  char *name = "UNKNOWN";
   switch(state) {
-    case runstate_startup:       print_oled(0, "startup"); break;
-    case runstate_idle:          print_oled(0, "idle"); break;
-    case runstate_finding_temp:  print_oled(0, "finding temp"); break;
-    case runstate_heating:       print_oled(0, "heating"); break;
-    case runstate_manual_pump:   print_oled(0, "manual"); break;
-    case runstate_test:          print_oled(0, "test"); break;
-    case runstate_panic:         print_oled(0, "panic"); break;
+    case runstate_startup:       name = "startup"; break;
+    case runstate_idle:          name = "idle"; break;
+    case runstate_finding_temp:  name = "finding temp"; break;
+    case runstate_heating:       name = "heating"; break;
+    case runstate_manual_pump:   name = "manual"; break;
+    case runstate_test:          name = "test"; break;
+    case runstate_panic:         name = "PANIC"; break;
   }
+  print_oled(0, "%s", name);
+#endif
 }
 
 void panic()
@@ -254,9 +271,9 @@ void panic()
   }
 }
 
-int smoothed_sensor_reading(int sensor)
+double smoothed_sensor_reading(int sensor)
 {
-    int result = 0;
+    double result = 0;
     for (int i = 0; i < temp_sample_count; i++) {
       result += temp_samples[sensor][i];
     }
@@ -267,7 +284,7 @@ int smoothed_sensor_reading(int sensor)
 
 void read_temp_sensors()
 {
-  int avg_reading = 0;
+  double avg_reading = 0;
   for (int i = 0; i < pin_temp_count; i++)
   {
     int value = analogRead(pin_temp[i]);
@@ -276,10 +293,18 @@ void read_temp_sensors()
     temp_samples[i][temp_sample_pointer] = value;
 
     // Smooth the temperature sampling over temp_sample_count samples
-    int smoothed_value = smoothed_sensor_reading(i);
+    double smoothed_value = smoothed_sensor_reading(i);
     avg_reading += smoothed_value;
 
-    print_oled(i + 1, "%d: %d (%d)", i, temp_to_farenheit(smoothed_value), smoothed_value);
+#ifdef OLED_DISPLAY
+    char raw_string[32];
+    dtostrf(smoothed_value, 1, 0, raw_string);
+    char voltage_string[32];
+    dtostrf(smoothed_value * ADC_DIVISOR, 1, 3, voltage_string);
+    char farenheit_string[32];
+    dtostrf(temp_to_farenheit(smoothed_value), 1, 1, farenheit_string);
+    print_oled(i + 1, "%s %s %s", farenheit_string, raw_string, voltage_string);
+#endif
   }
 
   // Calculate the average smoothed temp and save it.
@@ -287,7 +312,7 @@ void read_temp_sensors()
   last_temp = temp_to_farenheit(avg_reading);
 
   // If the smoothed readings from sensors 0 and 1 ever differ by more than panic_sensor_difference degrees, panic.
-  if (abs(temp_to_farenheit(smoothed_sensor_reading(0)) - temp_to_farenheit(smoothed_sensor_reading(1))) > panic_sensor_difference)
+  if (fabs(temp_to_farenheit(smoothed_sensor_reading(0)) - temp_to_farenheit(smoothed_sensor_reading(1))) > panic_sensor_difference)
   {
     panic();
   }
