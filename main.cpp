@@ -1,8 +1,77 @@
 #include <Arduino.h>
 
+#if defined(__AVR__)
+  // Watchdog timer support
+  #include <avr/wdt.h>
+
+  // All AVRs have 10-bit DACs.
+  const int ADC_RESOLUTION = 1024;
+
+  // Figure out which AREF option to use, and what the AREF voltage is.
+  // Lower AREF means higher resolution within range, so we want the lowest voltage above what we expect to see from the sensors.
+  // Many AVRs are able to select an internal AREF of 2.56 volts, which is a good choice.
+  // Internal AREF is also likely more accurate/stable than VCC.
+  #if defined(INTERNAL2V56)
+    // If we're on an architecture that supports this option, use it.
+    const double ADC_AREF_VOLTAGE = 2.56;
+    const int ADC_AREF_OPTION = INTERNAL2V56;
+  #elif defined(INTERNAL2V5)
+    // This is apparently available on megaAVR?
+    const double ADC_AREF_VOLTAGE = 2.5;
+    const int ADC_AREF_OPTION = INTERNAL2V5;
+  #else
+    // The singular internal AREF varies by CPU type.
+    #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega8__)
+      // Internal AREF is 2.56. Use it.
+      const double ADC_AREF_VOLTAGE = 2.56;
+      const int ADC_AREF_OPTION = INTERNAL;
+    #else
+      // internal AREF is too low (1.1v). Use the default VCC
+      const double ADC_AREF_VOLTAGE = 5.0;
+      const int ADC_AREF_OPTION = DEFAULT;
+    #endif
+
+  #endif
+
+double readVcc() {
+  // Save previous ADMUX value
+  uint8_t previous = ADMUX;
+  // Read 1.1V reference against AVcc
+  // set the reference to Vcc and the measurement to the internal 1.1V reference
+  #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+    ADMUX = _BV(REFS0) | _BV(MUX4) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  #elif defined (__AVR_ATtiny24__) || defined(__AVR_ATtiny44__) || defined(__AVR_ATtiny84__)
+     ADMUX = _BV(MUX5) | _BV(MUX0) ;
+  #else
+    ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  #endif  
+ 
+  delay(2); // Wait for Vref to settle
+  ADCSRA |= _BV(ADSC); // Start conversion
+  while (bit_is_set(ADCSRA,ADSC)); // measuring
+ 
+  uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH  
+  uint8_t high = ADCH; // unlocks both
+ 
+  long adc = (high<<8) | low;
+  
+  // Restore ADMUX
+  ADMUX = previous;
+  delay(2); // Wait for Vref to settle
+
+  return 1125.300 / adc; // Calculate Vcc (in V); 1125.300 = 1.1*1023
+}
+
+#else
+  // no watchdog timer support
+  #define wdt_enable(...)
+  #define wdt_disable(...)
+  #define wdt_reset(...)
+#endif
+
 //////////////////////////////////////////////////
 // board-specific defines
-#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_LEONARDO)
+#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_PROMICRO16)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
   const int pin_temp[] = { A0, A1 };
@@ -11,13 +80,10 @@
   const int OLED_DC = 6;
   const int OLED_RESET = 5;
 
-  // Values for the ADC in the AVR.
-  const int ADC_MAX = 1024;
-  const double ADC_VREF = 5.0;
 
 #endif
 
-const double ADC_DIVISOR = ADC_VREF / double(ADC_MAX);
+const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
 
 //////////////////////////////////////////////////
 // Feature defines
@@ -156,7 +222,7 @@ const uint32_t panic_wait_seconds = 5;
 // If smoothed readings ever disagree by this many degrees f, panic.
 const int panic_sensor_difference = 15;
 // If the temperature reading ever exceeds this many degrees f, panic.
-const int panic_high_temp = 108;
+const int panic_high_temp = 110;
 
 // Used to flash things in panic mode
 bool panic_flash;
@@ -207,36 +273,15 @@ void temp_adjust(int amount)
   temp_adjusted_millis = millis();  
 }
 
-// FIXME: These are not actually calibrated yet.
-// Left column is in volts, right column is degrees F
-const double temp_table[][2] = 
-{
-  { 0, 0 },
-  { 140 * ADC_DIVISOR, 72 }, 
-  { 180 * ADC_DIVISOR, 90 },
-  { ADC_VREF, 1000 }
-};
-
-const int temp_table_size = sizeof(temp_table) / sizeof(temp_table[0]);
-
 double temp_to_farenheit(double reading)
 {
   // Scale the reading to voltage
   reading *= ADC_DIVISOR;
 
-  for (int i = 1; i < temp_table_size; i++)
-  {
-    if (reading < temp_table[i][0]) {
-      // Linear interpolate between entries in the table.
-      double raw = reading - temp_table[i-1][0];
-      double raw_segment = temp_table[i][0] - temp_table[i-1][0];
-      double degrees_segment = temp_table[i][1] - temp_table[i-1][1];
-      return ((raw * degrees_segment) / raw_segment) + temp_table[i-1][1];
-    }
-  }
-
-  // Return a value which will definitely cause a panic.
-  return 1000.0;
+  // The temperature sensors seem to be LM34s.
+  // (Linear, 750mv at 75 degrees F, slope 10mv/degree F)
+  // Basically, temperature in F is voltage * 100.
+  return (reading * 100);
 }
 
 void runstate_transition()
@@ -273,6 +318,10 @@ void panic()
 
 double smoothed_sensor_reading(int sensor)
 {
+    if (sensor >= pin_temp_count) {
+      sensor = 0;
+    }
+
     double result = 0;
     for (int i = 0; i < temp_sample_count; i++) {
       result += temp_samples[sensor][i];
@@ -297,13 +346,13 @@ void read_temp_sensors()
     avg_reading += smoothed_value;
 
 #ifdef OLED_DISPLAY
-    char raw_string[32];
-    dtostrf(smoothed_value, 1, 0, raw_string);
+    // char raw_string[32];
+    // dtostrf(smoothed_value, 1, 0, raw_string);
     char voltage_string[32];
     dtostrf(smoothed_value * ADC_DIVISOR, 1, 3, voltage_string);
     char farenheit_string[32];
     dtostrf(temp_to_farenheit(smoothed_value), 1, 1, farenheit_string);
-    print_oled(i + 1, "%s %s %s", farenheit_string, raw_string, voltage_string);
+    print_oled(i + 1, "%s %s %d", farenheit_string, voltage_string, value);
 #endif
   }
 
@@ -328,6 +377,9 @@ void read_temp_sensors()
   if (temp_sample_pointer >= temp_sample_count) {
     temp_sample_pointer = 0;
   }
+
+  // Reset the watchdog timer.
+  wdt_reset();
 }
 
 void read_buttons()
@@ -420,6 +472,20 @@ void display_panic_countdown(int countdown)
   display_heat(true);
 }
 
+void display_vcc()
+{
+#if defined(__AVR__)
+  #if defined(OLED_DISPLAY)
+    double vcc = readVcc();
+    // char raw_string[32];
+    // dtostrf(smoothed_value, 1, 0, raw_string);
+    char vcc_string[32];
+    dtostrf(vcc, 1, 3, vcc_string);
+    print_oled(1 + pin_temp_count, "VCC = %s", vcc_string);
+  #endif
+#endif
+}
+
 void display_send()
 {
   // For now, always send whether dirty or not.
@@ -444,14 +510,24 @@ void set_pump(bool running)
 
 void setup() 
 {
+  // Just in case.
+  wdt_disable();
+
   serial_debug_init();
 
   // Communications with the control panel is 2400 baud ttl serial.
   Serial1.begin(2400);
 
+  // Set the AREF voltage for reading from the sensors.
+  analogReference(ADC_AREF_OPTION);
+
   pinMode(pin_pump, OUTPUT);
+  // Make really sure the pump is not running.
+  digitalWrite(pin_pump, 0);
   
   start_oled();
+
+  display_vcc();
 
   enter_state(runstate_startup);
 }
@@ -592,6 +668,9 @@ void loop() {
         display_set_digits(0x0a, 0x00, 0x0a);
       if (seconds_since_last_transition > startup_wait_seconds)
       {
+        // Before starting the pump for the first time, enable the watchdog timer.
+        wdt_enable(WDTO_4S);
+
         // Turn on the pump and enter the "finding temp" state.
         enter_state(runstate_finding_temp);
       }
@@ -685,6 +764,9 @@ void loop() {
       }
     break;
   }
+
+  // Always update the display of vcc.
+  display_vcc();
 
   display_send();
 

@@ -19,13 +19,7 @@ The plug pinout for the panel is:
 5. (no connection)
 6. Blue - +5v
 
-The temperature sensors seem to have a built-in resistor network. Supplying them with +5v and ground on the red and black wires, respectively, and reading the voltage on the green wire with an analog input gives a result that varies with temperature.
+The temperature sensors seem to be a linear analog sensor, probably an LM34. Supply +5v/ground on the red and blue wires, and read a voltage proportional to temperature back on the green wire. The voltage read times 100 gives the temperature in Farenheit.
 
-I've done a first pass of the logic that approximates the behavior of the original controller, with a couple of minor tweaks. 
-
-## To-do:
-
-- Create a calibration table to map the sensor readings to degrees Farenheit
-- Finish up the prototyping shield
-- Figure out an enclosure for the Arduino
+The conrtol logic approximates the behavior of the original controller, with a couple of minor tweaks. Holding the temperature up/down buttons will adjust the temperature quickly. There's a "panic" mode if the two sensors go out of agreement or the temperature reading goes above 110 degrees farenheit, which shuts off the motor and flashes the two temperature readings on the display panel. The user can clear panic mode by holding the "light" and "jets" buttons together for 5 seconds (although if the panic condition is still present it will immediately reenter the panic state).
 
