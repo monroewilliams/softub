@@ -1,10 +1,13 @@
+// Enable strlcat (for esp8266, at least)
+#define _DEFAULT_SOURCE 1
+
 #include <Arduino.h>
 
 #if defined(__AVR__)
   // Watchdog timer support
   #include <avr/wdt.h>
 
-  // All AVRs have 10-bit DACs.
+  // All AVRs have 10-bit ADCs.
   const int ADC_RESOLUTION = 1024;
 
   // Figure out which AREF option to use, and what the AREF voltage is.
@@ -62,6 +65,22 @@ double readVcc() {
   return 1125.300 / adc; // Calculate Vcc (in V); 1125.300 = 1.1*1023
 }
 
+#elif defined(ARDUINO_ARCH_ESP8266)
+  // ESP8266 has 10 bit ADCs
+  const int ADC_RESOLUTION = 1024;
+
+  // DAC measures from 0 to 1v.
+  // The board _should_ have a voltage divider so that it reads from 0 to 3.3v.
+  const double ADC_AREF_VOLTAGE = 3.3;
+  const int ADC_AREF_OPTION = DEFAULT;
+
+  // no watchdog timer support
+  // #define wdt_enable(...)
+  // #define wdt_disable(...)
+  // #define wdt_reset(...)
+
+  // This architecture defines a "panic" macro that conflicts with our local function. 
+  #undef panic
 #else
   // no watchdog timer support
   #define wdt_enable(...)
@@ -71,16 +90,27 @@ double readVcc() {
 
 //////////////////////////////////////////////////
 // board-specific defines
-#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_LEONARDO) || defined(ARDUINO_AVR_PROMICRO16)
+#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_LEONARDO)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
   const int pin_temp[] = { A0, A1 };
-
+  const int OLED_CS = 5;
+  const int OLED_DC = 4;
+  const int OLED_RESET = 3;
+#elif defined(ARDUINO_AVR_PROMICRO16)
+  // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
+  const int pin_pump = 2;
+  const int pin_temp[] = { A0, A1 };
   const int OLED_CS = 7;
   const int OLED_DC = 6;
   const int OLED_RESET = 5;
-
-
+#elif defined(ARDUINO_ESP8266_WEMOS_D1MINI)
+  // The I/O for the panel must be connected to the Serial1 pins (TX/RX).
+  const int pin_pump = 0;
+  const int pin_temp[] = { A0 };
+  const int OLED_CS = 3;
+  const int OLED_DC = 2;
+  const int OLED_RESET = 1;
 #endif
 
 const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
