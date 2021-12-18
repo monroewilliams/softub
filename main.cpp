@@ -887,7 +887,7 @@ void webserver_handle_root() {
   char message[256];
   char farenheit_string[32];
   dtostrf(last_temp, 1, 1, farenheit_string);
-  snprintf(message, sizeof(message), "%s\n%s\n", farenheit_string, pump_running?"1":"0");
+  snprintf(message, sizeof(message), "%s\n%d\n%s\n", farenheit_string, temp_setting, pump_running?"1":"0");
   server.send(200, "text/plain", message);
 }
 
