@@ -250,7 +250,7 @@ const uint32_t manual_pump_seconds = 60 * 10;
 // The amount of time the user has to hold buttons to escape panic state
 const uint32_t panic_wait_seconds = 5;
 // If smoothed readings ever disagree by this many degrees f, panic.
-const int panic_sensor_difference = 15;
+const int panic_sensor_difference = 10;
 // If the temperature reading ever exceeds this many degrees f, panic.
 const int panic_high_temp = 110;
 
@@ -262,7 +262,7 @@ bool panic_flash;
 const int pin_temp_count = sizeof(pin_temp) / sizeof(pin_temp[0]);
 
 // smooth the temperature sampling over this many samples, to filter out noise.
-const int temp_sample_count = 256;
+const int temp_sample_count = 32;
 int temp_sample_pointer = 0;
 int temp_samples[pin_temp_count][temp_sample_count];
 
