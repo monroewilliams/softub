@@ -1,11 +1,41 @@
-// Enable strlcat (for esp8266, at least)
-#define _DEFAULT_SOURCE 1
-
 #include <Arduino.h>
+
+//////////////////////////////////////////////////
+// Feature defines
+// #define SERIAL_DEBUG 1
+#define OLED_DISPLAY 1
+#define WEBSERVER 1
+
+// Webserver is only available on ESP32.
+#if defined(WEBSERVER) && !defined(ARDUINO_ARCH_ESP32)
+  #undef WEBSERVER
+#endif
+
+#if defined(WEBSERVER)
+  #include <WiFiClient.h>
+  #include <ESP32WebServer.h>
+  #include <WiFi.h>
+  #include <ESPmDNS.h>
+
+  ESP32WebServer server(80);
+#endif
+
+void webserver_start();
+void webserver_service();
 
 #if defined(__AVR__)
   // Watchdog timer support
   #include <avr/wdt.h>
+  void watchdog_init() {
+    // Start with the watchdog timer disabled
+    wdt_disable();
+  }
+  void watchdog_start() {
+    wdt_enable(WDTO_2S);
+  }
+  void watchdog_reset() {
+    wdt_reset();
+  }
 
   // All AVRs have 10-bit ADCs.
   const int ADC_RESOLUTION = 1024;
@@ -17,21 +47,21 @@
   #if defined(INTERNAL2V56)
     // If we're on an architecture that supports this option, use it.
     const double ADC_AREF_VOLTAGE = 2.56;
-    const int ADC_AREF_OPTION = INTERNAL2V56;
+    #define ADC_AREF_OPTION INTERNAL2V56
   #elif defined(INTERNAL2V5)
     // This is apparently available on megaAVR?
     const double ADC_AREF_VOLTAGE = 2.5;
-    const int ADC_AREF_OPTION = INTERNAL2V5;
+    #define ADC_AREF_OPTION INTERNAL2V5
   #else
     // The singular internal AREF varies by CPU type.
     #if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega8__)
       // Internal AREF is 2.56. Use it.
       const double ADC_AREF_VOLTAGE = 2.56;
-      const int ADC_AREF_OPTION = INTERNAL;
+      #define ADC_AREF_OPTION INTERNAL
     #else
       // internal AREF is too low (1.1v). Use the default VCC
       const double ADC_AREF_VOLTAGE = 5.0;
-      const int ADC_AREF_OPTION = DEFAULT;
+      #define ADC_AREF_OPTION DEFAULT
     #endif
 
   #endif
@@ -65,38 +95,60 @@ double readVcc() {
   return 1125.300 / adc; // Calculate Vcc (in V); 1125.300 = 1.1*1023
 }
 
-#elif defined(ARDUINO_ARCH_ESP8266)
-  // ESP8266 has 10 bit ADCs
-  const int ADC_RESOLUTION = 1024;
+#elif defined(ARDUINO_ARCH_ESP32)
+  // Watchdog timer support
+  #include <esp_task_wdt.h>
+  void watchdog_init() {
+    // Start with the watchdog timer disabled
+    esp_task_wdt_init(2, false);
+  }
+  void watchdog_start() {
+    // Start the watchdog timer watching this task
+    esp_task_wdt_init(2, true);
+    esp_task_wdt_add(NULL);
+  }
+  void watchdog_reset() {
+    esp_task_wdt_reset();
+  }
 
-  // DAC measures from 0 to 1v.
-  // The board _should_ have a voltage divider so that it reads from 0 to 3.3v.
-  const double ADC_AREF_VOLTAGE = 3.3;
-  const int ADC_AREF_OPTION = DEFAULT;
+  #define SERIAL_DEBUG_SPEED 115200
 
-  // no watchdog timer support
-  // #define wdt_enable(...)
-  // #define wdt_disable(...)
-  // #define wdt_reset(...)
+  // ESP32 has 12 bit ADCs
+  const int ADC_RESOLUTION = 4096;
 
-  // This architecture defines a "panic" macro that conflicts with our local function. 
-  #undef panic
+  // Ref: https://esp32.com/viewtopic.php?t=1053
+  // The ADC measures from 0 to 1.1v, moderated by the attenuation factor.
+  // The voltage attenuation defaults to ADC_11db, which scales it by a factor of 1/3.6.
+  // const double ADC_AREF_VOLTAGE = 1.1 * 3.6;
+
+  // Reducing the scaling factor a bit gives us more usable resolution.
+  // I don't want to use ADC_0db, as this would max out at 1.1 = 110 degrees F, which we could realistically see.
+  // ADC_2_5db scales the voltage by 1/1.34 and gives us a range up to 1.47 = 147 degrees F, which is high enough.
+  #define ADC_ATTENUATION_FACTOR ADC_2_5db
+  const double ADC_AREF_VOLTAGE = 1.1 * 1.34;
+
 #else
   // no watchdog timer support
-  #define wdt_enable(...)
-  #define wdt_disable(...)
-  #define wdt_reset(...)
+  void watchdog_init() {}
+  void watchdog_start() {}
+  void watchdog_reset() {}
 #endif
 
 //////////////////////////////////////////////////
 // board-specific defines
-#if defined(ARDUINO_AVR_MEGA2560) || defined(ARDUINO_AVR_LEONARDO)
+#if defined(ARDUINO_AVR_LEONARDO)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
   const int pin_temp[] = { A0, A1 };
   const int OLED_CS = 5;
   const int OLED_DC = 4;
   const int OLED_RESET = 3;
+  // SCK and MOSI are only available in inconvenient locations on the Leonardo (on the ISCP header). 
+  // Use SW SPI for this case.
+  // These are ALMOST the same pin assignments that the Uno used for its hardware SPI pins.
+  // Since the spot where pin D13 would be on the Arducam IoTai ESP32 is N/C, use 12 instead.
+  #define OLED_CLOCK 12
+  #define OLED_MOSI 11
 #elif defined(ARDUINO_AVR_PROMICRO16)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
@@ -104,23 +156,24 @@ double readVcc() {
   const int OLED_CS = 7;
   const int OLED_DC = 6;
   const int OLED_RESET = 5;
-#elif defined(ARDUINO_ESP8266_WEMOS_D1MINI)
+#elif defined(ARDUINO_ARDUCAM_ESP32_UNO_UC_617)
   // The I/O for the panel must be connected to the Serial1 pins (TX/RX).
-  const int pin_pump = 0;
-  const int pin_temp[] = { A0 };
-  const int OLED_CS = 3;
-  const int OLED_DC = 2;
-  const int OLED_RESET = 1;
+  const int pin_pump = D2;
+  const int pin_temp[] = { S0, S1 };
+  const int OLED_CS = D5;
+  const int OLED_DC = D4;
+  const int OLED_RESET = D3;
+  #define OLED_CLOCK D12
+  #define OLED_MOSI D11
 #endif
 
 const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
 
-//////////////////////////////////////////////////
-// Feature defines
-// #define SERIAL_DEBUG 1
-#define OLED_DISPLAY 1
-
 #ifdef SERIAL_DEBUG
+  #ifndef SERIAL_DEBUG_SPEED
+    #define SERIAL_DEBUG_SPEED 9600
+  #endif
+
   void debug(const char *format, ...)
   {
     char string[256];
@@ -133,7 +186,7 @@ const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
   void serial_debug_init()
   {
     // delay(3000);
-    Serial.begin(9600);
+    Serial.begin(SERIAL_DEBUG_SPEED);
     // while (!Serial);
 
     debug("Serial initialized");
@@ -148,19 +201,12 @@ const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
 #ifdef OLED_DISPLAY
 #include <U8x8lib.h>
 
-#if defined(ARDUINO_AVR_LEONARDO)
-  // SCK and MOSI are only available in inconvenient locations on the Leonardo (on the ISCP header). 
-  // Use SW SPI for this case.
-  
-  // These are the same pin assignments that the Uno used for its hardware SPI pins, for shield compatibility.
-  const int OLED_CLOCK = 13;
-  const int OLED_MOSI = 11;
-
+#if defined(OLED_MOSI)
+  // Use software SPI
   // https://www.amazon.com/gp/product/B01N1LZT8L
   U8X8_SH1106_128X64_NONAME_4W_SW_SPI oled(OLED_CLOCK, OLED_MOSI, OLED_CS, OLED_DC , OLED_RESET);
 #else
   // Use hardware SPI
-
   // https://www.amazon.com/gp/product/B01N1LZT8L
   U8X8_SH1106_128X64_NONAME_4W_HW_SPI oled(OLED_CS, OLED_DC , OLED_RESET);
 #endif
@@ -375,9 +421,7 @@ void read_temp_sensors()
     double smoothed_value = smoothed_sensor_reading(i);
     avg_reading += smoothed_value;
 
-#ifdef OLED_DISPLAY
-    // char raw_string[32];
-    // dtostrf(smoothed_value, 1, 0, raw_string);
+#if defined(OLED_DISPLAY)
     char voltage_string[32];
     dtostrf(smoothed_value * ADC_DIVISOR, 1, 3, voltage_string);
     char farenheit_string[32];
@@ -409,7 +453,7 @@ void read_temp_sensors()
   }
 
   // Reset the watchdog timer.
-  wdt_reset();
+  watchdog_reset();
 }
 
 void read_buttons()
@@ -540,16 +584,28 @@ void set_pump(bool running)
 
 void setup() 
 {
-  // Just in case.
-  wdt_disable();
+  watchdog_init();
 
   serial_debug_init();
 
   // Communications with the control panel is 2400 baud ttl serial.
-  Serial1.begin(2400);
+  Serial1.begin(2400
+#if defined(ARDUINO_ARCH_ESP32)
+    // Specify format and pins
+    , SERIAL_8N1
+    , RX
+    , TX
+    , false // invert?
+#endif
+  );
 
+#ifdef ADC_AREF_OPTION
   // Set the AREF voltage for reading from the sensors.
   analogReference(ADC_AREF_OPTION);
+#endif
+#ifdef ADC_ATTENUATION_FACTOR
+  analogSetAttenuation(ADC_ATTENUATION_FACTOR);
+#endif
 
   pinMode(pin_pump, OUTPUT);
   // Make really sure the pump is not running.
@@ -558,6 +614,8 @@ void setup()
   start_oled();
 
   display_vcc();
+
+  webserver_start();
 
   enter_state(runstate_startup);
 }
@@ -699,7 +757,7 @@ void loop() {
       if (seconds_since_last_transition > startup_wait_seconds)
       {
         // Before starting the pump for the first time, enable the watchdog timer.
-        wdt_enable(WDTO_4S);
+        watchdog_start();
 
         // Turn on the pump and enter the "finding temp" state.
         enter_state(runstate_finding_temp);
@@ -800,17 +858,86 @@ void loop() {
 
   display_send();
 
+  webserver_service();
+
   uint32_t loop_time = micros() - loop_start_micros;
   if (loop_time < loop_microseconds)
   {
     uint32_t msRemaining = loop_microseconds - loop_time;
+    debug("loop time %ld, start %ld, remaining %ld", loop_time, loop_start_micros, msRemaining);
+#if defined(__AVR__)
     // On AVR, delayMicroseconds takes an int (16 bits), so it won't work properly if the delay time is over 65535ms
     if (msRemaining > UINT16_MAX) {
       delay(msRemaining / 1000l);
     } else 
+#endif
     {
       delayMicroseconds(msRemaining);
     }
   }
+  else
+  {
+    debug("loop time %ld", loop_time);
+  }
 }
 
+#if defined(WEBSERVER)
+
+void webserver_handle_root() {
+  char message[256];
+  char farenheit_string[32];
+  dtostrf(last_temp, 1, 1, farenheit_string);
+  snprintf(message, sizeof(message), "%s\n%s\n", farenheit_string, pump_running?"1":"0");
+  server.send(200, "text/plain", message);
+}
+
+void webserver_handle_not_found(){
+  server.send(404, "text/plain", "404 Not Found");
+}
+
+void webserver_start()
+{
+  const char* ssid = "*****";
+  const char* password = "*****";
+
+  print_oled(0, "Starting wifi");
+
+  WiFi.begin(ssid, password);
+
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    print_oled(1, "waiting...");
+  }
+  print_oled(1, "");
+
+  // Serial.println("");
+  // Serial.print("Connected to ");
+  // Serial.println(ssid);
+  // Serial.print("IP address: ");
+  // Serial.println(WiFi.localIP());
+
+  if (MDNS.begin("softub")) {
+    print_oled(0, "MDNS Started");
+    // Serial.println("MDNS responder started");
+  }
+
+  server.on("/", webserver_handle_root);
+
+  server.onNotFound(webserver_handle_not_found);
+
+  print_oled(0, "Starting server");
+  server.begin();
+  // Serial.println("HTTP server started");
+}
+
+void webserver_service()
+{
+  server.handleClient();
+}
+
+#else
+  // Webserver is disabled. These functions are no-ops.
+  void webserver_start() {}
+  void webserver_service() {}
+#endif

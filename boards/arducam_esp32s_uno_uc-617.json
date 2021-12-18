@@ -1,0 +1,38 @@
+{
+  "build": {
+    "arduino":{
+      "ldscript": "esp32_out.ld"
+    },
+    "core": "esp32",
+    "extra_flags": "-DARDUINO_ARDUCAM_ESP32_UNO_UC_617",
+    "f_cpu": "240000000L",
+    "f_flash": "40000000L",
+    "flash_mode": "dio",
+    "mcu": "esp32",
+    "variants_dir": "boards/variants",
+    "variant": "ArduCAM_ESP32S_UNO_UC-617"
+  },
+  "connectivity": [
+    "wifi",
+    "bluetooth",
+    "ethernet",
+    "can"
+  ],
+  "debug": {
+    "openocd_board": "esp-wroom-32.cfg"
+  },
+  "frameworks": [
+    "arduino",
+    "espidf"
+  ],
+  "name": "ArduCAM ESP32 UNO UC-617",
+  "upload": {
+    "flash_size": "4MB",
+    "maximum_ram_size": 327680,
+    "maximum_size": 1310720,
+    "require_upload_port": true,
+    "speed": 460800
+  },
+  "url": "https://www.arducam.com/product/b0192-arducam-iotai-esp32-uno-psram-ov2640-camera/",
+  "vendor": "ArduCam"
+}
