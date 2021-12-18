@@ -905,11 +905,11 @@ void webserver_start()
   WiFi.begin(ssid, password);
 
   // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    print_oled(1, "waiting...");
-  }
-  print_oled(1, "");
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   delay(500);
+  //   print_oled(1, "waiting...");
+  // }
+  // print_oled(1, "");
 
   // Serial.println("");
   // Serial.print("Connected to ");
@@ -917,18 +917,22 @@ void webserver_start()
   // Serial.print("IP address: ");
   // Serial.println(WiFi.localIP());
 
+  print_oled(1, "Starting MDNS");
   if (MDNS.begin("softub")) {
-    print_oled(0, "MDNS Started");
-    // Serial.println("MDNS responder started");
+    print_oled(1, "MDNS Started");
+  }
+  else {
+    print_oled(1, "MDNS failed");
   }
 
   server.on("/", webserver_handle_root);
 
   server.onNotFound(webserver_handle_not_found);
 
-  print_oled(0, "Starting server");
+  print_oled(2, "Starting server");
   server.begin();
-  // Serial.println("HTTP server started");
+
+  print_oled(2, "Server started");
 }
 
 void webserver_service()
