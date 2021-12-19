@@ -5,19 +5,11 @@
 // #define SERIAL_DEBUG 1
 #define OLED_DISPLAY 1
 #define WEBSERVER 1
+#define MDNS_NAME "softub"
 
 // Webserver is only available on ESP32.
 #if defined(WEBSERVER) && !defined(ARDUINO_ARCH_ESP32)
   #undef WEBSERVER
-#endif
-
-#if defined(WEBSERVER)
-  #include <WiFiClient.h>
-  #include <ESP32WebServer.h>
-  #include <WiFi.h>
-  #include <ESPmDNS.h>
-
-  ESP32WebServer server(80);
 #endif
 
 void webserver_start();
@@ -139,32 +131,46 @@ double readVcc() {
 #if defined(ARDUINO_AVR_LEONARDO)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
-  const int pin_temp[] = { A0, A1 };
-  const int OLED_CS = 5;
-  const int OLED_DC = 4;
   const int OLED_RESET = 3;
+  const int OLED_DC = 4;
+  const int OLED_CS = 5;
   // SCK and MOSI are only available in inconvenient locations on the Leonardo (on the ISCP header). 
   // Use SW SPI for this case.
   // These are ALMOST the same pin assignments that the Uno used for its hardware SPI pins.
   // Since the spot where pin D13 would be on the Arducam IoTai ESP32 is N/C, use 12 instead.
-  #define OLED_CLOCK 12
   #define OLED_MOSI 11
+  #define OLED_CLOCK 12
+  const int pin_temp[] = { A5, A4 };
 #elif defined(ARDUINO_AVR_PROMICRO16)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
-  const int pin_temp[] = { A0, A1 };
-  const int OLED_CS = 7;
-  const int OLED_DC = 6;
   const int OLED_RESET = 5;
+  const int OLED_DC = 6;
+  const int OLED_CS = 7;
+  const int pin_temp[] = { A0, A1 };
 #elif defined(ARDUINO_ARDUCAM_ESP32_UNO_UC_617)
   // The I/O for the panel must be connected to the Serial1 pins (TX/RX).
   const int pin_pump = D2;
-  const int pin_temp[] = { S0, S1 };
-  const int OLED_CS = D5;
-  const int OLED_DC = D4;
   const int OLED_RESET = D3;
-  #define OLED_CLOCK D12
+  const int OLED_DC = D4;
+  const int OLED_CS = D5;
   #define OLED_MOSI D11
+  #define OLED_CLOCK D12
+  const int pin_temp[] = { S5, S4 };
+#elif defined(ARDUINO_WEMOS_D1_R32)
+  // SOME pins files for this board ID define the pins using their actual IO line numbers.
+  // The esp32doit-espduino board variant is one of those.
+
+  // The I/O for the panel must be connected to the Serial1 pins (TX/RX).
+  #define TX TX0
+  #define RX RX0
+  const int pin_pump = IO26;
+  const int OLED_RESET = IO25;
+  const int OLED_DC = IO17;
+  const int OLED_CS = IO16;
+  #define OLED_MOSI IO23
+  #define OLED_CLOCK IO19
+  const int pin_temp[] = { IO39, IO36 };
 #endif
 
 const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
@@ -286,13 +292,13 @@ const uint32_t temp_adjusted_display_millis = 5 * 1000l;
 // The amount of time to wait on startup before doing anything
 const uint32_t startup_wait_seconds = 5;
 // The amount of time we run the pump before believing the temperature reading
-const uint32_t temp_settle_millis = 15 * 1000l;
+const uint32_t temp_settle_millis = 30 * 1000l; // 30 seconds
 // The amount of time after stopping the pump when we no longer consider the temp valid.
-const uint32_t temp_decay_millis = 60 * 1000l;
+const uint32_t temp_decay_millis = 60 * 1000l; // 60 seconds
 // The amount of time in the idle state after which we should run to check the temperature.
-const uint32_t idle_seconds = 1 * 60 * 60;
+const uint32_t idle_seconds = 15 * 60;  // 15 minutes
 // When the user turns on the pump manually, run it for this long.
-const uint32_t manual_pump_seconds = 60 * 10;
+const uint32_t manual_pump_seconds = 15 * 60; // 15 minutes
 // The amount of time the user has to hold buttons to escape panic state
 const uint32_t panic_wait_seconds = 5;
 // If smoothed readings ever disagree by this many degrees f, panic.
@@ -882,6 +888,12 @@ void loop() {
 }
 
 #if defined(WEBSERVER)
+  #include <WiFiClient.h>
+  #include <ESP32WebServer.h>
+  #include <WiFi.h>
+  #include <ESPmDNS.h>
+
+  ESP32WebServer server(80);
 
 void webserver_handle_root() {
   char message[256];
@@ -917,13 +929,15 @@ void webserver_start()
   // Serial.print("IP address: ");
   // Serial.println(WiFi.localIP());
 
+#if defined(MDNS_NAME)
   print_oled(1, "Starting MDNS");
-  if (MDNS.begin("softub")) {
+  if (MDNS.begin(MDNS_NAME)) {
     print_oled(1, "MDNS Started");
   }
   else {
     print_oled(1, "MDNS failed");
   }
+#endif
 
   server.on("/", webserver_handle_root);
 
