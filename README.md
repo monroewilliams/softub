@@ -23,3 +23,10 @@ The temperature sensors seem to be a linear analog sensor, probably an LM34. Sup
 
 The control logic approximates the behavior of the original controller, with a couple of minor tweaks. Holding the temperature up/down buttons will adjust the temperature quickly. There's a "panic" mode if the two sensors go out of agreement or the temperature reading goes above 110 degrees farenheit, which shuts off the motor and flashes the two temperature readings on the display panel. The user can clear panic mode by holding the "light" and "jets" buttons together for 5 seconds (although if the panic condition is still present it will immediately reenter the panic state).
 
+I've also added support for an ESP32-based board (the [WeMos D1 R32](https://www.amazon.com/gp/product/B07WFZCBH8), which appears to be the same hardware as the [DOIT ESPduino32](https://www.amazon.com/dp/B0775WFN9P)). I've included a board definition and pins file for this in the repository, as the [sp32doit-espduino board definition](https://docs.platformio.org/en/latest/boards/espressif32/esp32doit-espduino.html) built into PlatformIO has a couple of minor issues (mostly that the SPI library expects SCK/MISO/MOSI/SS to be defined, which breaks the build). 
+
+On ESP32, the code can optionally fire up a web server that reports the current temperature, set temperature, and pump on/off status on one endpoint, and some debug information on another. I'm using this to pull the data onto another machine and build graphs with RRD.
+
+I've also included an option for updating the sketch over the network, since pulling the board out of the pump pod to tweak settings is going to be annoying.
+
+The relay/power supply unit I started with doesn't seem to have quite enough power for the ESP32 when WiFi is enabled -- the board is prone to brown out and reset (which doesn't happen when it's powered via USB). I've ordered a [different power supply](https://www.amazon.com/gp/product/B07V5XP92F) I hope will solve the problem, as well as a separate [single relay module](https://www.amazon.com/gp/product/B07TWH7DZ1)
