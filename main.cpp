@@ -895,6 +895,11 @@ void loop() {
     break;
   }
 
+  // If the temp was recently adjusted, override other modes and display it.
+  if (temp_adjusted) {
+    display_temperature(temp_setting);
+  }
+
   // Always update the display of vcc.
   display_vcc();
 
@@ -1039,13 +1044,13 @@ void network_service()
 
     // Maybe update the display.
 #ifdef OLED_DISPLAY
-    const char *status_string = "WiFI unknown";
+    String status_string;
     switch(status) {
       // Keep strings under 16 characters, so they don't truncate.
       case WL_IDLE_STATUS: status_string = "WiFI idle"; break;
       case WL_NO_SSID_AVAIL: status_string = "WiFI no ssid"; break;
       case WL_SCAN_COMPLETED: status_string = "WiFI scanned"; break;
-      case WL_CONNECTED: status_string = "WiFI connected"; break;
+      case WL_CONNECTED: status_string = WiFi.localIP().toString(); break;
       case WL_CONNECT_FAILED: status_string = "WiFI conn failed"; break;
       case WL_CONNECTION_LOST: status_string = "WiFI conn lost"; break;
       case WL_DISCONNECTED: status_string = "WiFI disconnect"; break;
@@ -1147,9 +1152,6 @@ void network_service()
 
         ArduinoOTA.begin();
       #endif // OTA_UPDATE
-
-      // Display the IP address on the last line of the display.
-      print_oled(3, WiFi.localIP().toString());
 
     }
 
