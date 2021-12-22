@@ -135,7 +135,8 @@ double readVcc() {
   const double ADC_AREF_VOLTAGE = 1.1 * 1.34;
 
   // Handy constants for interpreting esp_timer_get_time()
-  const int64_t second = 1000000l;
+  const int64_t millisecond = 1000l;
+  const int64_t second = 1000 * millisecond;
   const int64_t minute = 60 * second;
   const int64_t hour = 60 * minute;
   const int64_t day = 24 * hour;
@@ -160,8 +161,8 @@ double readVcc() {
   // Use SW SPI for this case.
   // These are ALMOST the same pin assignments that the Uno used for its hardware SPI pins.
   // Since the spot where pin D13 would be on the Arducam IoTai ESP32 is N/C, use 12 instead.
-  #define OLED_MOSI 11
-  #define OLED_CLOCK 12
+  // #define OLED_MOSI 11
+  // #define OLED_CLOCK 12
   const int pin_temp[] = { A5, A4 };
 #elif defined(ARDUINO_AVR_PROMICRO16)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
@@ -171,27 +172,33 @@ double readVcc() {
   const int OLED_CS = 7;
   const int pin_temp[] = { A0, A1 };
 #elif defined(ARDUINO_ARDUCAM_ESP32_UNO_UC_617)
-  // The I/O for the panel must be connected to the Serial1 pins (TX/RX).
+  const int PANEL_TX = TX;
+  const int PANEL_RX = RX;
   const int pin_pump = D2;
   const int OLED_RESET = D3;
   const int OLED_DC = D4;
   const int OLED_CS = D5;
-  #define OLED_MOSI D11
-  #define OLED_CLOCK D12
+  // #define OLED_MOSI D11
+  // #define OLED_CLOCK D12
   const int pin_temp[] = { S5, S4 };
 #elif defined(ARDUINO_WEMOS_D1_R32)
   // SOME pins files for this board ID define the pins using their actual IO line numbers.
   // The esp32doit-espduino board variant is one of those.
 
-  // The I/O for the panel must be connected to the Serial1 pins (TX/RX).
-  #define TX TX0
-  #define RX RX0
+  // The TX/RX pins on this board are shared with the USB serial interface, which is problematic.
+  // (Even if we're not using serial debug, the bootloader and other services will send data on these lines sometimes.)
+  // Use the pins that would be assigned to Serial2 by default.
+  // This means the shield pinout needed for this board will be different from the one for the Leonardo. 
+  // I admit defeat.
+  const int PANEL_TX = IO17;
+  const int PANEL_RX = IO16;
+  
   const int pin_pump = IO26;
   const int OLED_RESET = IO25;
   const int OLED_DC = IO17;
   const int OLED_CS = IO16;
-  #define OLED_MOSI IO23
-  #define OLED_CLOCK IO19
+  // #define OLED_MOSI IO23
+  // #define OLED_CLOCK IO19
   const int pin_temp[] = { IO39, IO36 };
 #endif
 
@@ -519,6 +526,10 @@ void display_update_checksum()
   display_buffer[5] = sum;
 }
 
+// Values in digit places:
+// 0 - 9 - digit
+// 0x0a - blank
+// 0x0b -- "P"
 void display_set_digit(int digit, uint8_t value)
 {
   if ((digit >= 0) && (digit < 3))
@@ -530,6 +541,7 @@ void display_set_digit(int digit, uint8_t value)
     }
   }
 }
+
 void display_set_digits(uint8_t a, uint8_t b, uint8_t c)
 {
   display_set_digit(0, a);
@@ -563,10 +575,6 @@ void display_heat(bool on)
   display_set_bits(1, 0x20, on);
 }
 
-// Values in digit places:
-// 0 - 9 - digit
-// 0x0a - blank
-// 0x0b -- "P"
 void display_temperature(int temp)
 {
   display_set_digits(temp / 100, (temp / 10) % 10, temp % 10);
@@ -602,8 +610,7 @@ void display_vcc()
 
 void display_send()
 {
-  // For now, always send whether dirty or not.
-  // if (display_dirty)
+  if (display_dirty)
   {
     display_update_checksum();
     Serial1.write(display_buffer, display_bytes);
@@ -633,8 +640,8 @@ void setup()
 #if defined(ARDUINO_ARCH_ESP32)
     // Specify format and pins
     , SERIAL_8N1
-    , RX
-    , TX
+    , PANEL_RX
+    , PANEL_TX
     , false // invert?
 #endif
   );
@@ -911,7 +918,7 @@ void loop() {
   if (loop_time < loop_microseconds)
   {
     uint32_t msRemaining = loop_microseconds - loop_time;
-    debug("loop time %ld, start %ld, remaining %ld", loop_time, loop_start_micros, msRemaining);
+    // debug("loop time %ld, start %ld, remaining %ld", loop_time, loop_start_micros, msRemaining);
 #if defined(__AVR__)
     // On AVR, delayMicroseconds takes an int (16 bits), so it won't work properly if the delay time is over 65535ms
     if (msRemaining > UINT16_MAX) {
@@ -924,7 +931,7 @@ void loop() {
   }
   else
   {
-    debug("loop time %ld", loop_time);
+    // debug("loop time %ld", loop_time);
   }
 }
 
@@ -947,6 +954,12 @@ void loop() {
       dtostrf(last_temp, 1, 1, farenheit_string);
       snprintf(message, sizeof(message), "%s\n%d\n%s\n", farenheit_string, temp_setting, pump_running?"1":"0");
       server.send(200, "text/plain", message);
+      debug(
+        "Webserver sending root response:\n"
+        "/--------------------------------\\\n"
+        "%s\n"
+        "\\--------------------------------/"
+        , message);
     }
 
     const char *reset_reason()
@@ -969,36 +982,36 @@ void loop() {
       default: break;
       }
 
-      return "can not be determined";
+      return "Reset reason can not be determined";
     }
 
     void webserver_handle_debug() {
       String message;
-      int64_t uptime = esp_timer_get_time();
 
-      // esp_timer_get_time returns an int64_t, which String doesn't have a formatter for.
-      // Casting the number of seconds down to uint32 means it will overflow after 136 years or so, which should be fine.
-      message += "Uptime = ";
-      if (uptime > year) {
-        message += int(uptime / year);
-        message += " years ";
+      int64_t uptime = esp_timer_get_time();
+      int years = uptime / year;
+      int days = (uptime % year) / day;
+      message += "Uptime: ";
+      if (years > 0) {
+        message += years;
+        message += (years != 1)?" years, ":" year, ";
       }
       if (uptime > day) {
-        message += int((uptime % year) / day);
-        message += " days ";
+        message += days;
+        message += (days != 1)?" days, ":" day, ";
       }
       if (uptime > hour) {
         message += int((uptime % day) / hour);
         message += ":";
       }
-      // Evidently, String can't do formatting with leading zeroes.
-      char buf[64];
-      snprintf(buf, sizeof(buf), "%02d:%02d\n",
+      // Evidently, the String class has no provision for number formatting with leading zeroes.
+      char buf[32];
+      snprintf(buf, sizeof(buf), "%02d:%02d.%03d\n",
         int((uptime % hour) / minute),
-        int((uptime % minute) / second));
+        int((uptime % minute) / second),
+        int((uptime % second) / millisecond));
       message += buf;
 
-      message += "Reset reason: ";
       message += reset_reason();
       message += "\n";
 
@@ -1010,21 +1023,47 @@ void loop() {
       message += " microseconds\n";
 
       server.send(200, "text/plain", message);
+      debug(
+        "Webserver sending debug response:\n"
+        "/--------------------------------\\\n"
+        "%s\n"
+        "\\--------------------------------/"
+        , message.c_str());
     }
 
     void webserver_handle_not_found(){
       server.send(404, "text/plain", "404 Not Found");
-    }
+       debug("Webserver sending 404 response");
+   }
   #endif // WEBSERVER
 
 void network_start()
 {
-  print_oled(3, "Wifi begin");
+  print_oled(3, "Starting WiFi");
+  debug("Starting WiFi");
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   // Instead of waiting for wifi to connect and starting services here,
   // check for connection and start them in network_service();
+}
+
+String status_string(wl_status_t status)
+{
+    String result;
+    switch(status) {
+      // Keep strings under 16 characters, so they don't truncate on the OLED.
+      case WL_IDLE_STATUS: result = "WiFi idle"; break;
+      case WL_NO_SSID_AVAIL: result = "WiFi no ssid"; break;
+      case WL_SCAN_COMPLETED: result = "WiFi scanned"; break;
+      case WL_CONNECTED: result = "WiFi connected"; break;
+      case WL_CONNECT_FAILED: result = "WiFi conn failed"; break;
+      case WL_CONNECTION_LOST: result = "WiFi conn lost"; break;
+      case WL_DISCONNECTED: result = "WiFi disconnect"; break;
+      default: result = "WiFi unknown"; break;
+    }
+
+    return result;
 }
 
 void network_service()
@@ -1042,117 +1081,115 @@ void network_service()
     // Status has changed. 
     last_status_change_time = now;
 
-    // Maybe update the display.
-#ifdef OLED_DISPLAY
-    String status_string;
-    switch(status) {
-      // Keep strings under 16 characters, so they don't truncate.
-      case WL_IDLE_STATUS: status_string = "WiFI idle"; break;
-      case WL_NO_SSID_AVAIL: status_string = "WiFI no ssid"; break;
-      case WL_SCAN_COMPLETED: status_string = "WiFI scanned"; break;
-      case WL_CONNECTED: status_string = WiFi.localIP().toString(); break;
-      case WL_CONNECT_FAILED: status_string = "WiFI conn failed"; break;
-      case WL_CONNECTION_LOST: status_string = "WiFI conn lost"; break;
-      case WL_DISCONNECTED: status_string = "WiFI disconnect"; break;
-      default: break;
-    }
-    print_oled(3, status_string);
-#endif // OLED_DISPLAY
+    print_oled(3, status_string(status));
+    debug("WiFI status changed from \"%s\" to \"%s\"", status_string(last_status).c_str(), status_string(status).c_str());
 
-    if (!services_started && (status == WL_CONNECTED))
+    if (status == WL_CONNECTED)
     {
-      // wifi has just connected, and we have not started services yet.
+      print_oled(3, WiFi.localIP().toString());
+      debug("IP address is %s", WiFi.localIP().toString().c_str());
 
-      // Start services.
-      services_started = true;
+      if (!services_started)
+      {
+        // wifi has just connected, and we have not started services yet.
 
-      //////////////////////////
-      // mDNS
-      #if defined(MDNS_NAME)
-        print_oled(1, "Starting MDNS");
-        const char *hostname = MDNS_NAME;
-        if (MDNS.begin(hostname)) {
-          print_oled(1, "MDNS Started");
-          #if defined(WEBSERVER)
-            MDNS.addService("_http", "_tcp", 80);
-          #endif
-        }
-        else {
-          print_oled(1, "MDNS failed");
-        }
-      #endif // MDNS_NAME
+        // Start services.
+        services_started = true;
 
-      //////////////////////////
-      // http server
-      #if defined(WEBSERVER)
-        server.on("/", webserver_handle_root);
-        server.on("/debug", webserver_handle_debug);
-
-        server.onNotFound(webserver_handle_not_found);
-
-        print_oled(2, "Starting webserver");
-        server.begin();
-
-        print_oled(2, "Webserver started");
-      #endif // WEBSERVER
-
-      //////////////////////////
-      // OTA firmware update
-      #if defined(OTA_UPDATE)
-        // Port defaults to 3232
-        // ArduinoOTA.setPort(3232);
-
-        // Hostname defaults to esp3232-[MAC]
-        #ifdef MDNS_NAME
-          ArduinoOTA.setHostname(MDNS_NAME);
-          ArduinoOTA.setMdnsEnabled(true);
-        #endif
-
-        // No authentication by default
-        #ifdef OTA_PASSWORD
-          ArduinoOTA.setPassword(OTA_PASSWORD);
-        #elif defined(OTA_PASSWORD_HASH)
-          ArduinoOTA.setPasswordHash(OTA_PASSWORD_HASH);
-        #endif
-
-        ArduinoOTA.onStart([]() {
-          // We're about to start an update.
-          // Turn off the pump.
-          set_pump(false);
-          
-          // Set the display to indicate the update is in progress
-          display_set_digits(0x0b, 0x00, 0x00);
-          display_send();
-          print_oled(0, "Updating...");
-          print_oled(1, "");
-          print_oled(2, "");
-          print_oled(3, "");
-        })
-        .onProgress([](unsigned int progress, unsigned int total) {
-          // Tend the watchdog timer
-          watchdog_reset();
-
-          // Set the display to indicate the update is in progress
-          static bool lights_toggle = false;
-          int percent = (progress / (total / 100));
-          lights_toggle = !lights_toggle;
-          if (percent < 100) {
-            display_temperature(percent);
-            display_set_digit(0, 0x0b);
-            display_heat(lights_toggle);
-            display_filter(!lights_toggle);
-          } else {
-            display_set_digits(0x0b, 0x0b, 0x0b);
-            display_heat(false);
-            display_filter(false);
+        //////////////////////////
+        // mDNS
+        #if defined(MDNS_NAME)
+          print_oled(1, "Starting MDNS");
+          debug("Starting MDNS...");
+          const char *hostname = MDNS_NAME;
+          if (MDNS.begin(hostname)) {
+            print_oled(1, "MDNS Started");
+            debug("MDNS Started");
+            #if defined(WEBSERVER)
+              MDNS.addService("_http", "_tcp", 80);
+            #endif
           }
-          display_send();
-          print_oled(1, "%d%%", percent);
-        });
+          else {
+            print_oled(1, "MDNS failed");
+            debug("MDNS failed");
+          }
+        #endif // MDNS_NAME
 
-        ArduinoOTA.begin();
-      #endif // OTA_UPDATE
+        //////////////////////////
+        // http server
+        #if defined(WEBSERVER)
+          server.on("/", webserver_handle_root);
+          server.on("/debug", webserver_handle_debug);
 
+          server.onNotFound(webserver_handle_not_found);
+
+          print_oled(2, "Starting webserver");
+          debug("Starting webserver...");
+          server.begin();
+
+          print_oled(2, "Webserver started");
+          debug("Webserver started");
+        #endif // WEBSERVER
+
+        //////////////////////////
+        // OTA firmware update
+        #if defined(OTA_UPDATE)
+          // Port defaults to 3232
+          // ArduinoOTA.setPort(3232);
+
+          // Hostname defaults to esp3232-[MAC]
+          #ifdef MDNS_NAME
+            ArduinoOTA.setHostname(MDNS_NAME);
+            ArduinoOTA.setMdnsEnabled(true);
+          #endif
+
+          // No authentication by default
+          #ifdef OTA_PASSWORD
+            ArduinoOTA.setPassword(OTA_PASSWORD);
+          #elif defined(OTA_PASSWORD_HASH)
+            ArduinoOTA.setPasswordHash(OTA_PASSWORD_HASH);
+          #endif
+
+          ArduinoOTA.onStart([]() {
+            // We're about to start an update.
+            // Turn off the pump.
+            set_pump(false);
+            
+            // Set the display to indicate the update is in progress
+            display_set_digits(0x0b, 0x00, 0x00);
+            display_send();
+            print_oled(0, "Updating...");
+            print_oled(1, "");
+            print_oled(2, "");
+            print_oled(3, "");
+          })
+          .onProgress([](unsigned int progress, unsigned int total) {
+            // Tend the watchdog timer
+            watchdog_reset();
+
+            // Set the display to indicate the update is in progress
+            static bool lights_toggle = false;
+            int percent = (progress / (total / 100));
+            lights_toggle = !lights_toggle;
+            if (percent < 100) {
+              display_temperature(percent);
+              display_set_digit(0, 0x0b);
+              display_heat(lights_toggle);
+              display_filter(!lights_toggle);
+            } else {
+              display_set_digits(0x0b, 0x0b, 0x0b);
+              display_heat(false);
+              display_filter(false);
+            }
+            display_send();
+            print_oled(1, "%d%%", percent);
+          });
+
+          debug("Starting OTA...");
+          ArduinoOTA.begin();
+          debug("OTA Started");
+        #endif // OTA_UPDATE
+      }
     }
 
     last_status = status;
@@ -1170,7 +1207,8 @@ void network_service()
           // We've been disconnected long enough, try reconnecting.
           // Consider this a status change, so we don't spam it.
           last_status_change_time = now; 
-          print_oled(3, "Wifi reconnect");
+          print_oled(3, "WiFi reconnect");
+          debug("WiFi reconnect");
           WiFi.disconnect();
           WiFi.reconnect();
         }
