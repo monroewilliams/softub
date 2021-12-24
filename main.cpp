@@ -154,6 +154,8 @@ double readVcc() {
 #if defined(ARDUINO_AVR_LEONARDO)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
+  const int pin_temp[] = { A5, A4 };
+
   const int OLED_RESET = 3;
   const int OLED_DC = 4;
   const int OLED_CS = 5;
@@ -163,27 +165,43 @@ double readVcc() {
   // Since the spot where pin D13 would be on the Arducam IoTai ESP32 is N/C, use 12 instead.
   // #define OLED_MOSI 11
   // #define OLED_CLOCK 12
-  const int pin_temp[] = { A5, A4 };
 #elif defined(ARDUINO_AVR_PROMICRO16)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
+  const int pin_temp[] = { A0, A1 };
+
   const int OLED_RESET = 5;
   const int OLED_DC = 6;
   const int OLED_CS = 7;
-  const int pin_temp[] = { A0, A1 };
 #elif defined(ARDUINO_ARDUCAM_ESP32_UNO_UC_617)
-  const int PANEL_TX = TX;
-  const int PANEL_RX = RX;
   const int pin_pump = D2;
-  const int OLED_RESET = D3;
-  const int OLED_DC = D4;
-  const int OLED_CS = D5;
-  // #define OLED_MOSI D11
-  // #define OLED_CLOCK D12
   const int pin_temp[] = { S5, S4 };
+
+  #if 0
+    // Same TX/RX as the WeMos D1
+    const int PANEL_TX = D4;
+    const int PANEL_RX = D5;
+    // NOTE: these conflict with the OLED pins.
+    #ifdef OLED_DISPLAY
+      // Pin conflict between tx/rx and oled! Disable oled.
+      #undef OLED_DISPLAY
+    #endif
+  #else
+    // Same TX/RX as the Leonardo
+    const int PANEL_TX = TX;
+    const int PANEL_RX = RX;
+
+    const int OLED_RESET = D3;
+    const int OLED_DC = D4;
+    const int OLED_CS = D5;
+    // #define OLED_MOSI D11
+    // #define OLED_CLOCK D12
+  #endif
 #elif defined(ARDUINO_WEMOS_D1_R32)
   // SOME pins files for this board ID define the pins using their actual IO line numbers.
   // The esp32doit-espduino board variant is one of those.
+  const int pin_pump = IO26;
+  const int pin_temp[] = { IO39, IO36 };
 
   // The TX/RX pins on this board are shared with the USB serial interface, which is problematic.
   // (Even if we're not using serial debug, the bootloader and other services will send data on these lines sometimes.)
@@ -193,13 +211,11 @@ double readVcc() {
   const int PANEL_TX = IO17;
   const int PANEL_RX = IO16;
   
-  const int pin_pump = IO26;
   const int OLED_RESET = IO25;
   const int OLED_DC = IO17;
   const int OLED_CS = IO16;
   // #define OLED_MOSI IO23
   // #define OLED_CLOCK IO19
-  const int pin_temp[] = { IO39, IO36 };
 #endif
 
 const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
@@ -257,7 +273,14 @@ const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
 void start_oled()
 {
   oled.begin();
-  oled.setFont(u8x8_font_8x13_1x2_f);
+  // oled.setFont(u8x8_font_amstrad_cpc_extended_f);
+  // oled.setFont(u8x8_font_pressstart2p_f);
+  oled.setFont(u8x8_font_pcsenior_f);
+  // oled.setFont(u8x8_font_pxplusibmcgathin_f);
+  // oled.setFont(u8x8_font_pxplusibmcga_f);
+  // oled.setFont(u8x8_font_pxplustandynewtv_f);
+
+  // oled.setFont(u8x8_font_8x13_1x2_f);
 }
 
 const int display_width = 16;
@@ -272,13 +295,13 @@ void print_oled(int line, const char *format, ...)
   // pad the remainder of the string with spaces, so it clears any previous text on this line.
   strlcat(string , "                      ", sizeof(string));
 
-  oled.drawString(0, line * 2, string);
+  oled.drawString(0, line, string);
 }
 void print_oled(int line, const String& string)
 {
   // pad the remainder of the string with spaces, so it clears any previous text on this line.
   String s = string + "                      ";
-  oled.drawString(0, line * 2, s.substring(0, display_width).c_str());
+  oled.drawString(0, line, s.substring(0, display_width).c_str());
 }
 
 #else // !OLED_DISPLAY
@@ -324,8 +347,10 @@ uint32_t runstate_last_transition_millis = 0;
 // The time of the last change to buttons pressed. This may be used differently by different states.
 uint32_t buttons_last_transition_millis = 0;
 
-// The last valid temperature reading we took
+// The last temperature reading we took
 double last_temp = 0;
+// The last valid temperature reading we took
+double last_valid_temp = 0;
 
 // Used to display temperature for a short time after the user adjusts it
 bool temp_adjusted = false;
@@ -469,11 +494,11 @@ void read_temp_sensors()
     avg_reading += smoothed_value;
 
 #if defined(OLED_DISPLAY)
-    char voltage_string[32];
-    dtostrf(smoothed_value * ADC_DIVISOR, 1, 3, voltage_string);
+    // char voltage_string[32];
+    // dtostrf(smoothed_value * ADC_DIVISOR, 1, 3, voltage_string);
     char farenheit_string[32];
     dtostrf(temp_to_farenheit(smoothed_value), 1, 1, farenheit_string);
-    print_oled(i + 1, "%s %s %d", farenheit_string, voltage_string, value);
+    print_oled(i + 1, "%s (%d)", farenheit_string, value);
 #endif
   }
 
@@ -603,7 +628,7 @@ void display_vcc()
     // dtostrf(smoothed_value, 1, 0, raw_string);
     char vcc_string[32];
     dtostrf(vcc, 1, 3, vcc_string);
-    print_oled(1 + pin_temp_count, "VCC = %s", vcc_string);
+    print_oled(7, "VCC = %s", vcc_string);
   #endif
 #endif
 }
@@ -687,6 +712,11 @@ void check_temp_validity()
         // The pump has been off long enough that we should no longer consider the temp valid.
       temp_valid = false;
     }
+  }
+
+  // If the temp is currently valid, update the last valid temp
+  if (temp_valid) {
+    last_valid_temp = last_temp;
   }
 }
 
@@ -847,9 +877,9 @@ void loop() {
       }
       else if (temp_adjusted)
       {
-        // If the user adjusted the temperature to above the last reading (even if that reading is no longer valid),
+        // If the user adjusted the temperature to above the last valid reading,
         // we may need to heat. Transition to the finding temperature state.
-        if (temp_setting > last_temp)
+        if (temp_setting > last_valid_temp)
         {
           enter_state(runstate_finding_temp);
         }
@@ -950,9 +980,11 @@ void loop() {
 
     void webserver_handle_root() {
       char message[256];
-      char farenheit_string[32];
-      dtostrf(last_temp, 1, 1, farenheit_string);
-      snprintf(message, sizeof(message), "%s\n%d\n%s\n", farenheit_string, temp_setting, pump_running?"1":"0");
+      char last_temp_string[32];
+      dtostrf(last_temp, 1, 1, last_temp_string);
+      char last_valid_temp_string[32];
+      dtostrf(last_valid_temp, 1, 1, last_valid_temp_string);
+      snprintf(message, sizeof(message), "%s\n%d\n%s\n%s\n", last_temp_string, temp_setting, pump_running?"1":"0", last_valid_temp_string);
       server.send(200, "text/plain", message);
       debug(
         "Webserver sending root response:\n"
@@ -1022,6 +1054,10 @@ void loop() {
       message += loop_microseconds;
       message += " microseconds\n";
 
+      message += "WiFI RSSI: ";
+      message += WiFi.RSSI();
+      message += " dBm\n";
+
       server.send(200, "text/plain", message);
       debug(
         "Webserver sending debug response:\n"
@@ -1039,7 +1075,7 @@ void loop() {
 
 void network_start()
 {
-  print_oled(3, "Starting WiFi");
+  print_oled(7, "Starting WiFi");
   debug("Starting WiFi");
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -1081,12 +1117,12 @@ void network_service()
     // Status has changed. 
     last_status_change_time = now;
 
-    print_oled(3, status_string(status));
+    print_oled(7, status_string(status));
     debug("WiFI status changed from \"%s\" to \"%s\"", status_string(last_status).c_str(), status_string(status).c_str());
 
     if (status == WL_CONNECTED)
     {
-      print_oled(3, WiFi.localIP().toString());
+      print_oled(7, WiFi.localIP().toString());
       debug("IP address is %s", WiFi.localIP().toString().c_str());
 
       if (!services_started)
@@ -1099,18 +1135,18 @@ void network_service()
         //////////////////////////
         // mDNS
         #if defined(MDNS_NAME)
-          print_oled(1, "Starting MDNS");
+          print_oled(6, "Starting MDNS");
           debug("Starting MDNS...");
           const char *hostname = MDNS_NAME;
           if (MDNS.begin(hostname)) {
-            print_oled(1, "MDNS Started");
+            print_oled(6, "MDNS Started");
             debug("MDNS Started");
             #if defined(WEBSERVER)
               MDNS.addService("_http", "_tcp", 80);
             #endif
           }
           else {
-            print_oled(1, "MDNS failed");
+            print_oled(6, "MDNS failed");
             debug("MDNS failed");
           }
         #endif // MDNS_NAME
@@ -1123,11 +1159,11 @@ void network_service()
 
           server.onNotFound(webserver_handle_not_found);
 
-          print_oled(2, "Starting webserver");
+          print_oled(6, "Starting webserver");
           debug("Starting webserver...");
           server.begin();
 
-          print_oled(2, "Webserver started");
+          print_oled(6, "Webserver started");
           debug("Webserver started");
         #endif // WEBSERVER
 
@@ -1159,9 +1195,9 @@ void network_service()
             display_set_digits(0x0b, 0x00, 0x00);
             display_send();
             print_oled(0, "Updating...");
-            print_oled(1, "");
-            print_oled(2, "");
-            print_oled(3, "");
+            for (int i = 1; i < 8; i++) {
+              print_oled(i, "");
+            }
           })
           .onProgress([](unsigned int progress, unsigned int total) {
             // Tend the watchdog timer
@@ -1216,6 +1252,11 @@ void network_service()
       default:
       break;
     }
+  }
+
+  // if (status == WL_CONNECTED)
+  {
+    print_oled(6, "RSSI: %d dBm", WiFi.RSSI());
   }
 
 #if defined(WEBSERVER)
