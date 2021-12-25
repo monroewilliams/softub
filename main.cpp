@@ -3,27 +3,24 @@
 
 //////////////////////////////////////////////////
 // Feature defines
+// These are now expected to be set from platformio.ini, like so:
+// build_flags = 
+// 	-D WEBSERVER=1
+
 // #define SERIAL_DEBUG 1
 // #define OLED_DISPLAY 1
-#define WEBSERVER 1
+// #define WEBSERVER 1
 // #define OTA_UPDATE 1
-#define MDNS_NAME "softub"
 
-// Store things like the wifi credentials and OTA password in this file, 
-// which is in .gitignore so I won't accidentally check it in.
-// It can also override the default settings of the feature defines (such as MDNS_NAME and OLED_DISPLAY).
-// with #define/#undef.
-#include "local-settings.h"
-// Settings it may define:
-//// These are required to be defined if either WEBSERVER or OTA_UPDATE is defined:
-// #define WIFI_SSID "SSID"
-// #define WIFI_PASSWORD "PASSWORD"
-//// These are optional (although highly recommended) auth credentials for OTA update
-// #define OTA_PASSWORD "admin"
-// #define OTA_PASSWORD_HASH "21232f297a57a5a743894a0e4a801fc3"
+#if !defined(MDNS_NAME)
+  #define MDNS_NAME "softub"
+#endif
 
 // Networking is only available on ESP32.
 #if (defined(WEBSERVER) || defined(OTA_UPDATE)) && defined(ARDUINO_ARCH_ESP32)
+  #if !defined(WIFI_SSID) || !defined(WIFI_PASSWORD)
+    #error "Network credentials must be defined"
+  #endif
   #define NETWORK 1
 #endif
 
@@ -118,8 +115,6 @@ double readVcc() {
     esp_task_wdt_reset();
   }
 
-  #define SERIAL_DEBUG_SPEED 115200
-
   // ESP32 has 12 bit ADCs
   const int ADC_RESOLUTION = 4096;
 
@@ -177,8 +172,8 @@ double readVcc() {
   const int pin_pump = D2;
   const int pin_temp[] = { S5, S4 };
 
-  #if 0
-    // Same TX/RX as the WeMos D1
+  #if 1
+    // Defines for the WeMos shield
     const int PANEL_TX = D4;
     const int PANEL_RX = D5;
     // NOTE: these conflict with the OLED pins.
@@ -187,7 +182,7 @@ double readVcc() {
       #undef OLED_DISPLAY
     #endif
   #else
-    // Same TX/RX as the Leonardo
+    // Defines for the Leonardo shield
     const int PANEL_TX = TX;
     const int PANEL_RX = RX;
 
@@ -1017,6 +1012,29 @@ void loop() {
       return "Reset reason can not be determined";
     }
 
+    const char* powerString(wifi_power_t power)
+    {
+      const char* result = "Unknown";
+
+      switch(power) {
+        case WIFI_POWER_19_5dBm: result = "19.5 dBm\n" ; break;
+        case WIFI_POWER_19dBm: result = "19.5 dBm\n" ; break;
+        case WIFI_POWER_18_5dBm: result = "18.5 dBm\n" ; break;
+        case WIFI_POWER_17dBm: result = "17 dBm\n" ; break;
+        case WIFI_POWER_15dBm: result = "15 dBm\n" ; break;
+        case WIFI_POWER_13dBm: result = "13 dBm\n" ; break;
+        case WIFI_POWER_11dBm: result = "11 dBm\n" ; break;
+        case WIFI_POWER_8_5dBm: result = "8.5 dBm\n" ; break;
+        case WIFI_POWER_7dBm: result = "7 dBm\n" ; break;
+        case WIFI_POWER_5dBm: result = "5 dBm\n" ; break;
+        case WIFI_POWER_2dBm: result = "2 dBm\n" ; break;
+        case WIFI_POWER_MINUS_1dBm: result = "-1 dBm\n" ; break;
+        default: break;
+      }
+
+      return result;
+    }
+
     void webserver_handle_debug() {
       String message;
 
@@ -1058,6 +1076,13 @@ void loop() {
       message += WiFi.RSSI();
       message += " dBm\n";
 
+      message += "WiFI Tx Power: ";
+      wifi_power_t power = WiFi.getTxPower();
+      message += powerString(power);
+      message += " (";
+      message += power;
+      message += ")\n";
+
       server.send(200, "text/plain", message);
       debug(
         "Webserver sending debug response:\n"
@@ -1078,6 +1103,15 @@ void network_start()
   print_oled(7, "Starting WiFi");
   debug("Starting WiFi");
 
+  // This doesn't really help, since the mDNS client doesn't appear to publish AAAA records.
+  // Maybe later?
+  // WiFi.enableIpV6();
+
+  // This sets the DHCP Client ID, and probably other things.
+#if defined(MDNS_NAME)
+  WiFi.setHostname(MDNS_NAME);
+#endif
+  
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   // Instead of waiting for wifi to connect and starting services here,
