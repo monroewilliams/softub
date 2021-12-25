@@ -476,6 +476,12 @@ double smoothed_sensor_reading(int sensor)
 
 void read_temp_sensors()
 {
+  // Advance the sample pointer in the ring buffer.
+  temp_sample_pointer++;
+  if (temp_sample_pointer >= temp_sample_count) {
+    temp_sample_pointer = 0;
+  }
+
   double avg_reading = 0;
   for (int i = 0; i < pin_temp_count; i++)
   {
@@ -511,12 +517,6 @@ void read_temp_sensors()
   if (last_temp > panic_high_temp) 
   {
     panic();
-  }
-
-  // Advance the sample pointer in the ring buffer.
-  temp_sample_pointer++;
-  if (temp_sample_pointer >= temp_sample_count) {
-    temp_sample_pointer = 0;
   }
 
   // Reset the watchdog timer.
@@ -1082,6 +1082,22 @@ void loop() {
       message += " (";
       message += power;
       message += ")\n";
+
+      for (int i = 0; i < pin_temp_count; i++)
+      {
+        // Replicate the temperature sample reporting that goes on the OLED.
+        int last_sample = temp_samples[i][temp_sample_pointer];
+        double smoothed_farenheit = temp_to_farenheit(smoothed_sensor_reading(i));
+        char farenheit_string[32];
+        dtostrf(smoothed_farenheit, 1, 1, farenheit_string);
+        message += "Sensor ";
+        message += i;
+        message += ": ";
+        message += farenheit_string;
+        message += "°F (";
+        message += last_sample;
+        message += ")\n";
+      }
 
       server.send(200, "text/plain", message);
       debug(
