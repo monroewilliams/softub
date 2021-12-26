@@ -168,7 +168,7 @@ double readVcc() {
   const int OLED_RESET = 5;
   const int OLED_DC = 6;
   const int OLED_CS = 7;
-#elif defined(ARDUINO_ARDUCAM_ESP32_UNO_UC_617)
+#elif defined(ARDUINO_ARDUCAM_IOTAI)
   const int pin_pump = D2;
   const int pin_temp[] = { S5, S4 };
 

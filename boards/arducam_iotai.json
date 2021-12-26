@@ -4,13 +4,13 @@
       "ldscript": "esp32_out.ld"
     },
     "core": "esp32",
-    "extra_flags": "-DARDUINO_ARDUCAM_ESP32_UNO_UC_617 -DBOARD_HAS_PSRAM -mfix-esp32-psram-cache-issue",
+    "extra_flags": "-DARDUINO_ARDUCAM_IOTAI -DBOARD_HAS_PSRAM -mfix-esp32-psram-cache-issue",
     "f_cpu": "240000000L",
     "f_flash": "40000000L",
     "flash_mode": "dio",
     "mcu": "esp32",
     "variants_dir": "boards/variants",
-    "variant": "ArduCAM_ESP32S_UNO_UC-617"
+    "variant": "ArduCAM_IoTai"
   },
   "connectivity": [
     "wifi",
@@ -25,7 +25,7 @@
     "arduino",
     "espidf"
   ],
-  "name": "ArduCAM ESP32 UNO UC-617",
+  "name": "ArduCAM IoTai",
   "upload": {
     "flash_size": "4MB",
     "maximum_ram_size": 327680,
@@ -33,6 +33,6 @@
     "require_upload_port": true,
     "speed": 460800
   },
-  "url": "https://www.arducam.com/product/b0192-arducam-iotai-esp32-uno-psram-ov2640-camera/",
+  "url": "https://www.arducam.com/docs/esp32-camera/the-arducam-iotai/",
   "vendor": "ArduCam"
 }
