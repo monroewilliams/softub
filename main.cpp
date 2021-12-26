@@ -151,15 +151,15 @@ double readVcc() {
   const int pin_pump = 2;
   const int pin_temp[] = { A5, A4 };
 
-  const int OLED_RESET = 3;
-  const int OLED_DC = 4;
-  const int OLED_CS = 5;
-  // SCK and MOSI are only available in inconvenient locations on the Leonardo (on the ISCP header). 
-  // Use SW SPI for this case.
-  // These are ALMOST the same pin assignments that the Uno used for its hardware SPI pins.
-  // Since the spot where pin D13 would be on the Arducam IoTai ESP32 is N/C, use 12 instead.
-  // #define OLED_MOSI 11
-  // #define OLED_CLOCK 12
+  // Make sure the pins shared with hardware SPI via the shield are high-impedance.
+  #define QUIESCE_PINS \
+    pinMode(13, INPUT); \
+    pinMode(11, INPUT);
+
+  const int OLED_RESET = 10;
+  const int OLED_DC = 9;
+  const int OLED_CS = 8;
+  // The shield has SCK/MOSI broken out from the ICSP header, so we're using hardware SPI.
 #elif defined(ARDUINO_AVR_PROMICRO16)
   // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
   const int pin_pump = 2;
@@ -172,26 +172,17 @@ double readVcc() {
   const int pin_pump = D2;
   const int pin_temp[] = { S5, S4 };
 
-  #if 1
-    // Defines for the WeMos shield
-    const int PANEL_TX = D4;
-    const int PANEL_RX = D5;
-    // NOTE: these conflict with the OLED pins.
-    #ifdef OLED_DISPLAY
-      // Pin conflict between tx/rx and oled! Disable oled.
-      #undef OLED_DISPLAY
-    #endif
-  #else
-    // Defines for the Leonardo shield
-    const int PANEL_TX = TX;
-    const int PANEL_RX = RX;
+  // Make sure the pins shared with hardware SPI via the shield are high-impedance.
+  // The spot for pin 13 is defined as "no connection" on this one
+  #define QUIESCE_PINS \
+    pinMode(D11, INPUT);
 
-    const int OLED_RESET = D3;
-    const int OLED_DC = D4;
-    const int OLED_CS = D5;
-    // #define OLED_MOSI D11
-    // #define OLED_CLOCK D12
-  #endif
+  const int PANEL_TX = D4;
+  const int PANEL_RX = D5;
+
+  const int OLED_RESET = D10;
+  const int OLED_DC = D9;
+  const int OLED_CS = D8;
 #elif defined(ARDUINO_WEMOS_D1_R32)
   // SOME pins files for this board ID define the pins using their actual IO line numbers.
   // The esp32doit-espduino board variant is one of those.
@@ -206,11 +197,9 @@ double readVcc() {
   const int PANEL_TX = IO17;
   const int PANEL_RX = IO16;
   
-  const int OLED_RESET = IO25;
-  const int OLED_DC = IO17;
-  const int OLED_CS = IO16;
-  // #define OLED_MOSI IO23
-  // #define OLED_CLOCK IO19
+  const int OLED_RESET = IO5;
+  const int OLED_DC = IO13;
+  const int OLED_CS = IO12;
 #endif
 
 const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
@@ -654,6 +643,11 @@ void setup()
   watchdog_init();
 
   serial_debug_init();
+
+  // Make sure the pins shared with hardware SPI via the shield are high-impedance.
+#ifdef QUIESCE_PINS
+  QUIESCE_PINS 
+#endif
 
   // Communications with the control panel is 2400 baud ttl serial.
   Serial1.begin(2400
