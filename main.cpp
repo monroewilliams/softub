@@ -399,6 +399,13 @@ enum {
   button_down = 0x08,
 };
 
+String dtostr(double number, signed char width, unsigned char prec) 
+{
+  char buf[32];
+  dtostrf(number, width, prec, buf);
+  return String(buf);
+}
+
 void temp_adjust(int amount)
 {
   temp_setting += amount;
@@ -534,11 +541,10 @@ void read_temp_sensors()
     avg_reading += smoothed_value;
 
 #if defined(OLED_DISPLAY)
-    // char voltage_string[32];
-    // dtostrf(smoothed_value * ADC_DIVISOR, 1, 3, voltage_string);
-    char farenheit_string[32];
-    dtostrf(adc_to_farenheit(smoothed_value), 1, 1, farenheit_string);
-    print_oled(i + 1, "%s (%d)", farenheit_string, value);
+    // dtostr(smoothed_value * ADC_DIVISOR, 1, 3);    
+    print_oled(i + 1, "%s (%d)", 
+      dtostr(adc_to_farenheit(smoothed_value), 1, 1).c_str(),
+      value);
 #endif
   }
 
@@ -658,11 +664,8 @@ void display_vcc()
 #if defined(__AVR__)
   #if defined(OLED_DISPLAY)
     double vcc = readVcc();
-    // char raw_string[32];
-    // dtostrf(smoothed_value, 1, 0, raw_string);
-    char vcc_string[32];
-    dtostrf(vcc, 1, 3, vcc_string);
-    print_oled(7, "VCC = %s", vcc_string);
+    // dtostr(smoothed_value, 1, 0);
+    print_oled(7, "VCC = %s", dtostr(vcc, 1, 3).c_str());
   #endif
 #endif
 }
@@ -875,6 +878,10 @@ void loop() {
         // Before starting the pump for the first time, enable the watchdog timer.
         watchdog_start();
 
+        // While we may not have an _actual_ valid temp yet, we should at least have a smoothed version of the current sensor temp.
+        // Use this for reporting stats for now, so we don't return garbage.
+        last_valid_temp = last_temp;
+
         // Turn on the pump and enter the "finding temp" state.
         enter_state(runstate_finding_temp);
       } else {
@@ -1009,19 +1016,16 @@ void loop() {
     ESP32WebServer server(80);
 
     void webserver_handle_stats() {
-      char message[256];
-      char last_temp_string[32];
-      dtostrf(last_temp, 1, 1, last_temp_string);
-      char last_valid_temp_string[32];
-      dtostrf(last_valid_temp, 1, 1, last_valid_temp_string);
-      snprintf(message, sizeof(message), "%s\n%d\n%s\n%s\n", last_temp_string, temp_setting, pump_running?"1":"0", last_valid_temp_string);
+      char message[256] = "\0";
+      // Don't return stats in startup state, since we won't have a full set of temperature samples yet.
+      if (runstate != runstate_startup) {
+        snprintf(message, sizeof(message), "%s\n%d\n%s\n%s\n", 
+          dtostr(last_temp, 1, 1).c_str(), 
+          temp_setting, 
+          pump_running?"1":"0", 
+          dtostr(last_valid_temp, 1, 1).c_str());
+      }
       server.send(200, "text/plain; charset=UTF-8", message);
-      debug(
-        "Webserver sending root response:\n"
-        "/--------------------------------\\\n"
-        "%s\n"
-        "\\--------------------------------/"
-        , message);
     }
 
     void webserver_handle_root() {
@@ -1046,7 +1050,7 @@ void loop() {
       message += state_name(runstate);
       message += "</p>\n";
       message += "<p>Current Temp: ";
-      message += int(last_temp);
+      message +=  dtostr(last_temp, 1, 1);
       message += "</p>\n";
       message += "<p>Temp Setting: ";
       message += temp_setting;
@@ -1193,7 +1197,7 @@ void loop() {
       }
 
       {
-        // Evidently, the String class has no provision for number formatting with leading zeroes.
+        // Evidently, the String class has no provision for integer formatting with leading zeroes.
         char buf[32];
         snprintf(buf, sizeof(buf), "%02d:%02d.%03d\n",
           int((uptime % hour) / minute),
@@ -1228,14 +1232,12 @@ void loop() {
       for (int i = 0; i < pin_temp_count; i++)
       {
         // Replicate the temperature sample reporting that goes on the OLED.
-        char farenheit_string[32];
         int last_sample = temp_samples[i][temp_sample_pointer];
         double smoothed_farenheit = adc_to_farenheit(smoothed_sensor_reading(i));
-        dtostrf(smoothed_farenheit, 1, 1, farenheit_string);
         message += "Sensor ";
         message += i;
         message += ": ";
-        message += farenheit_string;
+        message += dtostr(smoothed_farenheit, 1, 1);
         message += "°F (";
         message += last_sample;
         message += ")\n";
@@ -1245,21 +1247,13 @@ void loop() {
       message += temp_setting;
       message += "\n";
 
-      {
-        char last_temp_string[32];
-        dtostrf(last_temp, 1, 1, last_temp_string);
-        message += "Last temp: ";
-        message += last_temp_string;
-        message += "\n";
-      }
+      message += "Last temp: ";
+      message += dtostr(last_temp, 1, 1);
+      message += "\n";
 
-      {
-        char last_valid_temp_string[32];
-        dtostrf(last_valid_temp, 1, 1, last_valid_temp_string);
-        message += "Last valid temp: ";
-        message += last_valid_temp_string;
-        message += "\n";
-      }
+      message += "Last valid temp: ";
+      message += dtostr(last_valid_temp, 1, 1);
+      message += "\n";
 
       // Display http arguments:
       int arg_count = server.args();
@@ -1276,18 +1270,11 @@ void loop() {
       }
 
       server.send(200, "text/plain; charset=UTF-8", message);
-      debug(
-        "Webserver sending debug response:\n"
-        "/--------------------------------\\\n"
-        "%s\n"
-        "\\--------------------------------/"
-        , message.c_str());
     }
 #endif // WEBSERVER_DEBUG
 
     void webserver_handle_not_found(){
       server.send(404, "text/plain; charset=UTF-8", "404 Not Found");
-       debug("Webserver sending 404 response");
    }
   #endif // WEBSERVER
 
