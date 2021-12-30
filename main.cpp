@@ -12,6 +12,7 @@
 // #define WEBSERVER 1
 // #define OTA_UPDATE 1
 // #define WEBSERVER_DEBUG 1
+// #define WEBSERVER_REMOTE_CONTROL 1
 
 #if !defined(MDNS_NAME)
   #define MDNS_NAME "softub"
@@ -1031,6 +1032,107 @@ void loop() {
         , message);
     }
 
+    void webserver_handle_root() {
+      String message;
+      message += "<HEAD>";
+
+      // Refresh the page once a minute, to keep temperature updated.
+      message += "<meta http-equiv=\"refresh\" content=\"60\">";
+      // make this look decent on a phone
+      message += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
+
+      message += "<style>\n";
+      message += "html {display: inline-block; margin: 0px auto; text-align: center;}\n";
+      message += ".button { background-color: #7f7f7f; border: none; color: white; padding: 12px 24px; text-decoration: none; font-size: 24px; margin: 2px; cursor: pointer;}\n";
+      message += "</style>\n";
+
+      message += "<title>Hot Tub</title>";
+
+      message += "</HEAD>\n<BODY>\n";
+
+      message += "<p>Status: ";
+      message += state_name(runstate);
+      message += "</p>\n";
+      message += "<p>Current Temp: ";
+      message += int(last_temp);
+      message += "</p>\n";
+      message += "<p>Temp Setting: ";
+      message += temp_setting;
+      message += "</p>\n";
+
+      #if defined(WEBSERVER_REMOTE_CONTROL)
+        message += "<p><a href=\"/set?temp=up\"><button class=\"button\">Temp up</button></a></p>\n";
+        message += "<p><a href=\"/set?temp=down\"><button class=\"button\">Temp down</button></a></p>\n";
+        if (runstate == runstate_idle) {
+          message += "<p><a href=\"/set?jets=on\"><button class=\"button\">Jets on</button></a></p>\n";
+        } else if (runstate == runstate_manual_pump) {
+          message += "<p><a href=\"/set?jets=off\"><button class=\"button\">Jets off</button></a></p>\n";
+        }
+      #endif
+
+      message += "</BODY>\n";
+      server.send(200, "text/html; charset=UTF-8", message);
+    }
+
+  #if defined(WEBSERVER_REMOTE_CONTROL)
+    void webserver_handle_set() {
+      String message;
+      // Redirect to the root page when we're done here.
+      // message += "<HEAD><meta http-equiv=\"refresh\" content=\"0;url=/\"></HEAD>\n<BODY>\n";
+      message += "<HEAD></HEAD>\n<BODY>\n";
+      if (server.hasArg("temp")) {
+        // Request to set the temperature
+        String tempString = server.arg("temp");
+        int temp = tempString.toInt();
+        // If the conversion fails, temp will be 0. This is handled by the range check below.
+        if (tempString.equals("up")) {
+          temp_adjust(1);
+          message += "Temp incremented to ";
+          message += temp_setting;
+          message += "<br>\n";
+        } else if (tempString.equals("down")) {
+          temp_adjust(-1);
+          message += "Temp decremented to ";
+          message += temp_setting;
+          message += "<br>\n";
+        } else if ((temp >= temp_min) && (temp <= temp_max)) {
+          temp_setting = temp;
+          // This handles updating the last-temp-adjust time, etc.
+          temp_adjust(0);
+          message += "Temp set to ";
+          message += temp_setting;
+          message += "<br>\n";
+        } else {
+          message += "Temp arg out of range: ";
+          message += tempString;
+          message += "<br>\n";
+        }
+      }
+      if (server.hasArg("jets")) {
+        String jetsString = server.arg("jets");
+        if ((runstate == runstate_idle) && jetsString.equals("on")) {
+          message += "Turning on manual pump<br>\n";
+          enter_state(runstate_manual_pump);
+        } else if ((runstate == runstate_manual_pump) && jetsString.equals("off")) {
+          message += "Turning off manual pump<br>\n";
+          enter_state(runstate_idle);
+        } else {
+          message += "Jets command \"";
+          message += jetsString;
+          message += "\" ignored in run state ";
+          message += state_name(runstate);
+          message += "<br>\n";
+        }
+      }
+
+      message += "</BODY>\n";
+
+      // Redirect to the root page
+      server.sendHeader("Location", "/", false);
+      server.send(303, "text/html; charset=UTF-8", message);
+    }
+  #endif
+
     const char *reset_reason()
     {
       // Hat tip to https://www.robmiles.com/journal/2020/1/20/disabling-the-esp32-brownout-detector for this
@@ -1264,9 +1366,13 @@ void network_service()
         //////////////////////////
         // http server
         #if defined(WEBSERVER)
+          server.on("/", webserver_handle_root);
           server.on("/stats", webserver_handle_stats);
           #if defined(WEBSERVER_DEBUG)
             server.on("/debug", webserver_handle_debug);
+          #endif
+          #if defined(WEBSERVER_REMOTE_CONTROL)
+            server.on("/set", webserver_handle_set);
           #endif
 
           server.onNotFound(webserver_handle_not_found);
