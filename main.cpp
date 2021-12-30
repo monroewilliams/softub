@@ -1021,7 +1021,7 @@ void loop() {
       char last_valid_temp_string[32];
       dtostrf(last_valid_temp, 1, 1, last_valid_temp_string);
       snprintf(message, sizeof(message), "%s\n%d\n%s\n%s\n", last_temp_string, temp_setting, pump_running?"1":"0", last_valid_temp_string);
-      server.send(200, "text/plain", message);
+      server.send(200, "text/plain; charset=UTF-8", message);
       debug(
         "Webserver sending root response:\n"
         "/--------------------------------\\\n"
@@ -1168,7 +1168,7 @@ void loop() {
         message += "\n";
       }
 
-      server.send(200, "text/plain", message);
+      server.send(200, "text/plain; charset=UTF-8", message);
       debug(
         "Webserver sending debug response:\n"
         "/--------------------------------\\\n"
@@ -1179,7 +1179,7 @@ void loop() {
 #endif // WEBSERVER_DEBUG
 
     void webserver_handle_not_found(){
-      server.send(404, "text/plain", "404 Not Found");
+      server.send(404, "text/plain; charset=UTF-8", "404 Not Found");
        debug("Webserver sending 404 response");
    }
   #endif // WEBSERVER
