@@ -850,7 +850,6 @@ void loop() {
         }
       }
     }
-
   }
 
   // Default to displaying the current temp if it's valid and not recently adjusted, or the set point otherwise.
@@ -871,7 +870,6 @@ void loop() {
   
   switch(runstate) {
     case runstate_startup:
-        display_set_digits(0x0a, 0x00, 0x0a);
       if (seconds_since_last_transition > startup_wait_seconds)
       {
         // Before starting the pump for the first time, enable the watchdog timer.
@@ -879,57 +877,56 @@ void loop() {
 
         // Turn on the pump and enter the "finding temp" state.
         enter_state(runstate_finding_temp);
+      } else {
+        display_set_digits(0x0a, 0x00, 0x0a);
       }
     break;
     case runstate_finding_temp:
-      set_pump(true);
-      if (temp_valid)
-      {
+      if (jets_pushed) {
+        // From the finding temp state, allow the user to turn off the pump manually.
+        enter_state(runstate_idle);
+      } else if (temp_valid) {
         // Go into the heating state. It will flip back to idle if no heating is needed.
         enter_state(runstate_heating);
       } else {
+        set_pump(true);
         // indicate that we're still finding temp
         display_set_digits(0x0a, 0x0b, 0x0a);
       }
     break;
     case runstate_heating:
-      set_pump(true);
-      display_heat(true);
-      if (last_valid_temp > (temp_setting + temp_setting_range))
-      {
+      if (jets_pushed) {
+        // From the heating state, allow the user to turn off the pump manually.
+        enter_state(runstate_idle);
+      } else if (last_valid_temp > (temp_setting + temp_setting_range)) {
          // We've reached the set point. Turn the pump off and go to idle.
         enter_state(runstate_idle);
+      } else {
+        set_pump(true);
+        display_heat(true);
       }
     break;
     case runstate_idle:
-      set_pump(false);
-      if (jets_pushed)
-      {
+      if (jets_pushed) {
         // From the idle state, allow the user to turn on the pump manually.
         enter_state(runstate_manual_pump);
-      }
-      else if (seconds_since_last_transition > idle_seconds)
-      {
+      } else if (seconds_since_last_transition > idle_seconds) {
         // We've been idle long enough that we should do a temperature check.
         enter_state(runstate_finding_temp);
-      }
-      else if (temp_adjusted)
-      {
-        // If the user adjusted the temperature to above the last valid reading,
-        // we may need to heat. Transition to the finding temperature state.
-        if ((temp_setting + temp_setting_range) > last_valid_temp)
-        {
-          enter_state(runstate_finding_temp);
-        }
-
+      } else if ((temp_adjusted) && ((temp_setting + temp_setting_range) > last_valid_temp)) {
+        // The user adjusted the temperature to above the last valid reading.
+        // Transition to the finding temperature state to figure out if we need to heat.
+        enter_state(runstate_finding_temp);
+      } else {
+        set_pump(false);
       }
     break;
     case runstate_manual_pump:
-      set_pump(true);
-      if (jets_pushed)
-      {
+      if (jets_pushed) {
         // From the manual state, allow the user to turn off the pump.
         enter_state(runstate_idle);
+      } else {
+        set_pump(true);
       }
     break;
     case runstate_test:
@@ -946,22 +943,17 @@ void loop() {
     break;
     case runstate_panic:
       set_pump(false);
-      if (buttons == (button_jets | button_light))
-      {
+      if (buttons == (button_jets | button_light)) {
         // User is holding down the button combo. 
-        if (seconds_since_button_change >= panic_wait_seconds)
-        {
+        if (seconds_since_button_change >= panic_wait_seconds) {
           // They've successfully escaped.
           enter_state(runstate_startup);
         } else {
           display_panic_countdown(panic_wait_seconds -  seconds_since_button_change);
         }
-      }
-      else
-      {
+      } else {
         // Not holding buttons, just flash
-        if (millis_since_last_transition >= 500)
-        {
+        if (millis_since_last_transition >= 500) {
           panic_flash = !panic_flash;
           runstate_transition();
         }
@@ -1063,10 +1055,17 @@ void loop() {
       #if defined(WEBSERVER_REMOTE_CONTROL)
         message += "<p><a href=\"/set?temp=up\"><button class=\"button\">Temp up</button></a></p>\n";
         message += "<p><a href=\"/set?temp=down\"><button class=\"button\">Temp down</button></a></p>\n";
-        if (runstate == runstate_idle) {
-          message += "<p><a href=\"/set?jets=on\"><button class=\"button\">Jets on</button></a></p>\n";
-        } else if (runstate == runstate_manual_pump) {
-          message += "<p><a href=\"/set?jets=off\"><button class=\"button\">Jets off</button></a></p>\n";
+        switch (runstate) {
+          case runstate_idle:
+            message += "<p><a href=\"/set?jets=on\"><button class=\"button\">Jets on</button></a></p>\n";
+          break;
+          case runstate_heating:
+          case runstate_finding_temp:
+          case runstate_manual_pump:
+            message += "<p><a href=\"/set?jets=off\"><button class=\"button\">Jets off</button></a></p>\n";
+          break;
+          default:
+          break;
         }
       #endif
 
@@ -1110,13 +1109,29 @@ void loop() {
       }
       if (server.hasArg("jets")) {
         String jetsString = server.arg("jets");
-        if ((runstate == runstate_idle) && jetsString.equals("on")) {
-          message += "Turning on manual pump<br>\n";
-          enter_state(runstate_manual_pump);
-        } else if ((runstate == runstate_manual_pump) && jetsString.equals("off")) {
-          message += "Turning off manual pump<br>\n";
-          enter_state(runstate_idle);
-        } else {
+        bool accepted = false;
+        switch (runstate) {
+          case runstate_idle:
+            if (jetsString.equals("on") || jetsString.equals("toggle")) {
+              accepted = true;
+              message += "Turning on manual pump<br>\n";
+              enter_state(runstate_manual_pump);
+            }
+          break;
+          case runstate_finding_temp:
+          case runstate_manual_pump:
+          case runstate_heating:
+            if (jetsString.equals("off") || jetsString.equals("toggle")) {
+              accepted = true;
+              message += "Turning off manual pump<br>\n";
+              enter_state(runstate_idle);
+            }
+          break;
+          default:
+          break;
+        }
+        if (!accepted)
+        {
           message += "Jets command \"";
           message += jetsString;
           message += "\" ignored in run state ";
