@@ -11,6 +11,7 @@
 // #define OLED_DISPLAY 1
 // #define WEBSERVER 1
 // #define OTA_UPDATE 1
+// #define WEBSERVER_DEBUG 1
 
 #if !defined(MDNS_NAME)
   #define MDNS_NAME "softub"
@@ -1075,6 +1076,7 @@ void loop() {
       return result;
     }
 
+#if defined(WEBSERVER_DEBUG)
     void webserver_handle_debug() {
       String message;
 
@@ -1174,6 +1176,7 @@ void loop() {
         "\\--------------------------------/"
         , message.c_str());
     }
+#endif // WEBSERVER_DEBUG
 
     void webserver_handle_not_found(){
       server.send(404, "text/plain", "404 Not Found");
@@ -1272,7 +1275,9 @@ void network_service()
         // http server
         #if defined(WEBSERVER)
           server.on("/", webserver_handle_root);
-          server.on("/debug", webserver_handle_debug);
+          #if defined(WEBSERVER_DEBUG)
+            server.on("/debug", webserver_handle_debug);
+          #endif
 
           server.onNotFound(webserver_handle_not_found);
 
