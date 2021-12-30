@@ -323,7 +323,8 @@ enum
 
 int runstate = runstate_startup;
 
-const int temp_min = 60;
+// Min and max allowed setpoints
+const int temp_min = 50;
 const int temp_max = 110;
 
 // The time of the last transition. This may be used differently by different states.
