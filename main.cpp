@@ -461,12 +461,8 @@ void runstate_transition()
   runstate_last_transition_millis = millis();
 }
 
-void enter_state(int state)
+const char* state_name(int state)
 {
-  runstate = state;
-  runstate_transition();
-
-#ifdef OLED_DISPLAY
   const char *name = "UNKNOWN";
   switch(state) {
     case runstate_startup:       name = "startup"; break;
@@ -477,7 +473,16 @@ void enter_state(int state)
     case runstate_test:          name = "test"; break;
     case runstate_panic:         name = "PANIC"; break;
   }
-  print_oled(0, "%s", name);
+  return name;
+}
+
+void enter_state(int state)
+{
+  runstate = state;
+  runstate_transition();
+
+#ifdef OLED_DISPLAY
+  print_oled(0, "%s", state_name(state));
 #endif
 }
 
@@ -1120,6 +1125,10 @@ void loop() {
       message += power;
       message += ")\n";
 
+      message += "Run state: ";
+      message += state_name(runstate);
+      message += "\n";
+
       for (int i = 0; i < pin_temp_count; i++)
       {
         // Replicate the temperature sample reporting that goes on the OLED.
@@ -1135,6 +1144,10 @@ void loop() {
         message += last_sample;
         message += ")\n";
       }
+
+      message += "Set temp: ";
+      message += temp_setting;
+      message += "\n";
 
       {
         char last_temp_string[32];
