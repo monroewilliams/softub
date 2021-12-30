@@ -404,8 +404,48 @@ void temp_adjust(int amount)
   temp_adjusted = true;
   temp_adjusted_millis = millis();  
 }
+double sensor_temp_to_water_temp(double sensor_f)
+{
+  // On my tub, the temperature sensor reading is consistently offset from the actual water temp.
+  // Near 100 degrees it reads 10 degrees high. 
+  // This function does a linear interpoation using this table to map sensor temperature to actual water temp.
+  // I haven't yet characterized the offset at other temperatures, but I assume it won't be constant.
+  // FIXME: acually calibrate this.
+  // Left column is sensor temp, right column is water temp.
+  const double temp_table[][2] = 
+  {
+    { 0, 0 - 10 },
+    { 50, 50 - 10 }, 
+    { 60, 60 - 10 }, 
+    { 70, 70 - 10 }, 
+    { 80, 80 - 10 }, 
+    { 90, 90 - 10 }, 
+    { 100, 100 - 10 }, 
+    { 110, 110 - 10 }, 
+    { 120, 120 - 10 },
+    { 130, 130 - 10 },
+    { 140, 140 - 10 },
+    // Max possible temperature reading, just to set an approximate slope above the expected range.
+    { ADC_AREF_VOLTAGE * 100, (ADC_AREF_VOLTAGE * 100) - 10 }
+  };
+  const int temp_table_size = sizeof(temp_table) / sizeof(temp_table[0]);
 
-double temp_to_farenheit(double reading)
+  for (int i = 1; i < temp_table_size; i++)
+  {
+    if (sensor_f < temp_table[i][0]) {
+      // Linear interpolate between entries in the table.
+      double raw = sensor_f - temp_table[i-1][0];
+      double raw_segment = temp_table[i][0] - temp_table[i-1][0];
+      double degrees_segment = temp_table[i][1] - temp_table[i-1][1];
+      return ((raw * degrees_segment) / raw_segment) + temp_table[i-1][1];
+    }
+  }
+  
+  // Return a value which will definitely cause a panic.
+  return 1000.0;
+}
+
+double adc_to_farenheit(double reading)
 {
   // Scale the reading to voltage
   reading *= ADC_DIVISOR;
@@ -487,17 +527,17 @@ void read_temp_sensors()
     // char voltage_string[32];
     // dtostrf(smoothed_value * ADC_DIVISOR, 1, 3, voltage_string);
     char farenheit_string[32];
-    dtostrf(temp_to_farenheit(smoothed_value), 1, 1, farenheit_string);
+    dtostrf(adc_to_farenheit(smoothed_value), 1, 1, farenheit_string);
     print_oled(i + 1, "%s (%d)", farenheit_string, value);
 #endif
   }
 
   // Calculate the average smoothed temp and save it.
   avg_reading /= pin_temp_count;
-  last_temp = temp_to_farenheit(avg_reading);
+  last_temp = sensor_temp_to_water_temp(adc_to_farenheit(avg_reading));
 
   // If the smoothed readings from sensors 0 and 1 ever differ by more than panic_sensor_difference degrees, panic.
-  if (fabs(temp_to_farenheit(smoothed_sensor_reading(0)) - temp_to_farenheit(smoothed_sensor_reading(1))) > panic_sensor_difference)
+  if (fabs(adc_to_farenheit(smoothed_sensor_reading(0)) - adc_to_farenheit(smoothed_sensor_reading(1))) > panic_sensor_difference)
   {
     panic();
   }
@@ -591,7 +631,7 @@ void display_temperature(int temp)
 
 void display_panic()
 {
-  display_temperature(temp_to_farenheit(smoothed_sensor_reading(panic_flash?0:1)));
+  display_temperature(adc_to_farenheit(smoothed_sensor_reading(panic_flash?0:1)));
   display_heat(!panic_flash);
   display_filter(panic_flash);
 }
@@ -1048,13 +1088,16 @@ void loop() {
         message += int((uptime % day) / hour);
         message += ":";
       }
-      // Evidently, the String class has no provision for number formatting with leading zeroes.
-      char buf[32];
-      snprintf(buf, sizeof(buf), "%02d:%02d.%03d\n",
-        int((uptime % hour) / minute),
-        int((uptime % minute) / second),
-        int((uptime % second) / millisecond));
-      message += buf;
+
+      {
+        // Evidently, the String class has no provision for number formatting with leading zeroes.
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%02d:%02d.%03d\n",
+          int((uptime % hour) / minute),
+          int((uptime % minute) / second),
+          int((uptime % second) / millisecond));
+        message += buf;
+      }
 
       message += reset_reason();
       message += "\n";
@@ -1080,9 +1123,9 @@ void loop() {
       for (int i = 0; i < pin_temp_count; i++)
       {
         // Replicate the temperature sample reporting that goes on the OLED.
-        int last_sample = temp_samples[i][temp_sample_pointer];
-        double smoothed_farenheit = temp_to_farenheit(smoothed_sensor_reading(i));
         char farenheit_string[32];
+        int last_sample = temp_samples[i][temp_sample_pointer];
+        double smoothed_farenheit = adc_to_farenheit(smoothed_sensor_reading(i));
         dtostrf(smoothed_farenheit, 1, 1, farenheit_string);
         message += "Sensor ";
         message += i;
@@ -1091,6 +1134,22 @@ void loop() {
         message += "°F (";
         message += last_sample;
         message += ")\n";
+      }
+
+      {
+        char last_temp_string[32];
+        dtostrf(last_temp, 1, 1, last_temp_string);
+        message += "Last temp: ";
+        message += last_temp_string;
+        message += "\n";
+      }
+
+      {
+        char last_valid_temp_string[32];
+        dtostrf(last_valid_temp, 1, 1, last_valid_temp_string);
+        message += "Last valid temp: ";
+        message += last_valid_temp_string;
+        message += "\n";
       }
 
       server.send(200, "text/plain", message);
