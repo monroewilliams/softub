@@ -5,7 +5,9 @@ It should be able to directly replace the existing control board with an Arduino
 
 My initial build is using a [Leonardo clone](https://www.amazon.com/dp/B0786LJQ8K), and one of [these combined relay and 5v power supplies](https://www.amazon.com/dp/B077W1NVLM). Currently I'm planning to use a [prototyping shield](https://www.amazon.com/dp/B00Q9YB7PI) to distribute power and mount plugs for the connections.
 
-I'm planning to mount the relay/supply unit in a [junction box](https://www.homedepot.com/p/Commercial-Electric-1-2-in-Gray-2-Gang-7-Holes-Non-Metallic-Weatherproof-Box-WDB750PG/300851103) with a [blank cover](https://www.homedepot.com/p/Commercial-Electric-Gray-2-Gang-Non-Metallic-Weatherproof-Blank-Cover-WBC200PG/300851669) and some [cable](https://www.homedepot.com/p/3-4-in-Strain-Relief-Cord-Connector-LPCG757-1/100171642) [seals](https://www.homedepot.com/p/Arlington-Industries-1-2-in-Low-Profile-Strain-Relief-Cord-Connector-LPCG507-1/308920052) so that all AC power is isolated from the arduino. I haven't yet worked out what sort of enclosure the Arduino will go in.
+I'm planning to mount the relay/supply unit in a [junction box](https://www.homedepot.com/p/Commercial-Electric-1-2-in-Gray-2-Gang-7-Holes-Non-Metallic-Weatherproof-Box-WDB750PG/300851103) with a [blank cover](https://www.homedepot.com/p/Commercial-Electric-Gray-2-Gang-Non-Metallic-Weatherproof-Blank-Cover-WBC200PG/300851669) and some [cable](https://www.homedepot.com/p/3-4-in-Strain-Relief-Cord-Connector-LPCG757-1/100171642) [seals](https://www.homedepot.com/p/Arlington-Industries-1-2-in-Low-Profile-Strain-Relief-Cord-Connector-LPCG507-1/308920052) so that all AC power is isolated from the arduino. 
+
+The Arduino board is mounted in a [separate enclosure with its own cable seals](https://www.amazon.com/dp/B08M3R71ZD).
 
 ## Current state of the project:
 
@@ -29,4 +31,10 @@ On ESP32, the code can optionally fire up a web server that reports the current 
 
 I've also included an option for updating the sketch over the network, since pulling the board out of the pump pod to tweak settings is going to be annoying.
 
-The relay/power supply unit I started with doesn't seem to have quite enough power for the ESP32 when WiFi is enabled -- the board is prone to brown out and reset (which doesn't happen when it's powered via USB). I've ordered a [different power supply](https://www.amazon.com/gp/product/B07V5XP92F) I hope will solve the problem, as well as a separate [single relay module](https://www.amazon.com/gp/product/B07TWH7DZ1)
+The relay/power supply unit I started with doesn't seem to have quite enough power for the ESP32 when WiFi is enabled -- the board is prone to brown out and reset (which doesn't happen when it's powered via USB). I've switched to a [different power supply](https://www.amazon.com/gp/product/B07V5XP92F) and a separate [single relay module](https://www.amazon.com/gp/product/B07TWH7DZ1), which solve this issue.
+
+Upon installing the board into the Softub pod (which is of course outside my house), I found that the board-trace antenna was not sufficient for it to be able to connect to my house WiFi (even though one of my access points is just inside a wall from the tub, it seems that wall is exceptionally good at attenuating signals for some reason). I was able to fix this by resoldering the extremely tiny jumper on the ArduCAM IoTai board to enable the external antenna connector, and adding a [+8dB antenna and pigtail](https://www.amazon.com/dp/B082SHBWTK) mounted on the outside of the enclosure. 
+
+With that change, everything is currently working. I've since also added a debug endpoint that reports some internal info about the code, and an html page at the root which allows the set temperature to be adjusted and the jets to be turned on and off.
+
+There's still a bit of work to do: it seems that the temperature reported by the sensors is higher than the actual water temperature (around 10 degrees higher when the water is 100 degrees). I've currently got an offset baked into the code to account for this, but I expect that the offset will be different at different water temperatures, and I'll need to gather some data on this to calibrate the table in the sensor_temp_to_water_temp() function.
