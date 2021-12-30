@@ -1014,7 +1014,7 @@ void loop() {
     #include <ESP32WebServer.h>
     ESP32WebServer server(80);
 
-    void webserver_handle_root() {
+    void webserver_handle_stats() {
       char message[256];
       char last_temp_string[32];
       dtostrf(last_temp, 1, 1, last_temp_string);
@@ -1274,7 +1274,7 @@ void network_service()
         //////////////////////////
         // http server
         #if defined(WEBSERVER)
-          server.on("/", webserver_handle_root);
+          server.on("/stats", webserver_handle_stats);
           #if defined(WEBSERVER_DEBUG)
             server.on("/debug", webserver_handle_debug);
           #endif
