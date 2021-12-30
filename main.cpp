@@ -1053,29 +1053,6 @@ void loop() {
       return "Reset reason can not be determined";
     }
 
-    const char* powerString(wifi_power_t power)
-    {
-      const char* result = "Unknown";
-
-      switch(power) {
-        case WIFI_POWER_19_5dBm: result = "19.5 dBm\n" ; break;
-        case WIFI_POWER_19dBm: result = "19.5 dBm\n" ; break;
-        case WIFI_POWER_18_5dBm: result = "18.5 dBm\n" ; break;
-        case WIFI_POWER_17dBm: result = "17 dBm\n" ; break;
-        case WIFI_POWER_15dBm: result = "15 dBm\n" ; break;
-        case WIFI_POWER_13dBm: result = "13 dBm\n" ; break;
-        case WIFI_POWER_11dBm: result = "11 dBm\n" ; break;
-        case WIFI_POWER_8_5dBm: result = "8.5 dBm\n" ; break;
-        case WIFI_POWER_7dBm: result = "7 dBm\n" ; break;
-        case WIFI_POWER_5dBm: result = "5 dBm\n" ; break;
-        case WIFI_POWER_2dBm: result = "2 dBm\n" ; break;
-        case WIFI_POWER_MINUS_1dBm: result = "-1 dBm\n" ; break;
-        default: break;
-      }
-
-      return result;
-    }
-
 #if defined(WEBSERVER_DEBUG)
     void webserver_handle_debug() {
       String message;
@@ -1123,10 +1100,8 @@ void loop() {
 
       message += "WiFI Tx Power: ";
       wifi_power_t power = WiFi.getTxPower();
-      message += powerString(power);
-      message += " (";
       message += power;
-      message += ")\n";
+      message += "\n";
 
       message += "Run state: ";
       message += state_name(runstate);
