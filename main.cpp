@@ -345,7 +345,7 @@ uint32_t temp_adjusted_millis = 0;
 const uint32_t temp_adjusted_display_millis = 5 * 1000l;
 
 // The amount of time to wait on startup before doing anything
-const uint32_t startup_wait_seconds = 5;
+const uint32_t startup_wait_seconds = 10;
 // The amount of time we run the pump before believing the temperature reading
 const uint32_t temp_settle_millis = 30 * 1000l; // 30 seconds
 // The amount of time after stopping the pump when we no longer consider the temp valid.
@@ -369,7 +369,7 @@ bool panic_flash;
 const int pin_temp_count = sizeof(pin_temp) / sizeof(pin_temp[0]);
 
 // smooth the temperature sampling over this many samples, to filter out noise.
-const int temp_sample_count = 32;
+const int temp_sample_count = 128;
 int temp_sample_pointer = 0;
 int temp_samples[pin_temp_count][temp_sample_count];
 
@@ -378,8 +378,8 @@ uint8_t display_buffer[] = { 0x02, 0x00, 0x01, 0x00, 0x00, 0x01, 0xFF};
 const int32_t display_bytes = sizeof(display_buffer) / sizeof(display_buffer[0]); 
 bool display_dirty = true;
 
-// loop no faster than 15Hz
-const uint32_t loop_microseconds = 1000000l / 15;
+// loop no faster than 16Hz
+const uint32_t loop_microseconds = 1000000l / 16;
 
 uint32_t buttons = 0;
 uint32_t last_buttons = 0;
