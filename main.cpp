@@ -1168,6 +1168,20 @@ void loop() {
         message += "\n";
       }
 
+      // Display http arguments:
+      int arg_count = server.args();
+      if (arg_count > 0)
+      {
+        message += "HTTP arguments:\n";
+        for (int i = 0; i < arg_count; i++) {
+          message += "   ";
+          message += server.argName(i);
+          message += ": ";
+          message += server.arg(i);
+          message += "\n";
+        }
+      }
+
       server.send(200, "text/plain; charset=UTF-8", message);
       debug(
         "Webserver sending debug response:\n"
