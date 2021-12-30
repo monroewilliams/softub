@@ -386,6 +386,8 @@ uint32_t pump_switch_millis = 0;
 bool temp_valid = false;
 
 int temp_setting = 100;
+// stop heating at temp_setting + temp_setting_range, 
+double temp_setting_range = 0.5;
 
 enum {
   button_jets = 0x01,
@@ -890,8 +892,7 @@ void loop() {
     case runstate_heating:
       set_pump(true);
       display_heat(true);
-      // When we're in this state, the temp should always be valid.
-      if (last_temp > temp_setting)
+      if (last_valid_temp > (temp_setting + temp_setting_range))
       {
          // We've reached the set point. Turn the pump off and go to idle.
         enter_state(runstate_idle);
@@ -913,7 +914,7 @@ void loop() {
       {
         // If the user adjusted the temperature to above the last valid reading,
         // we may need to heat. Transition to the finding temperature state.
-        if (temp_setting > last_valid_temp)
+        if ((temp_setting + temp_setting_range) > last_valid_temp)
         {
           enter_state(runstate_finding_temp);
         }
