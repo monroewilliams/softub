@@ -11,7 +11,8 @@ The Arduino board is mounted in a [separate enclosure with its own cable seals](
 
 ## Current state of the project:
 
-I've reverse-engineered the protocol the original box uses to talk to the panel. (It's a pretty straightfoward binary protocol over TTL Serial at 2400 baud.)
+I've reverse-engineered the protocol the original box uses to talk to the panel. (It's a pretty straightfoward binary protocol over TTL Serial at 2400 baud.) For anyone interested in the reverse-engineering process I went through to figure out the protocol, I've documented it [here](./hardware/reverse-engineering.md).
+
 The plug pinout for the panel is:
 
 1. Yellow - Gnd
@@ -22,6 +23,7 @@ The plug pinout for the panel is:
 6. Blue - +5v
 
 The temperature sensors seem to be a linear analog sensor, probably an LM34. Supply +5v/ground on the red and blue wires, and read a voltage proportional to temperature back on the green wire. The voltage read times 100 gives the temperature in Farenheit.
+
 
 The control logic approximates the behavior of the original controller, with a couple of minor tweaks. Holding the temperature up/down buttons will adjust the temperature quickly. There's a "panic" mode if the two sensors go out of agreement or the temperature reading goes above 110 degrees farenheit, which shuts off the motor and flashes the two temperature readings on the display panel. The user can clear panic mode by holding the "light" and "jets" buttons together for 5 seconds (although if the panic condition is still present it will immediately reenter the panic state).
 
