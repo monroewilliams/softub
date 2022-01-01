@@ -1016,14 +1016,20 @@ void loop() {
     ESP32WebServer server(80);
 
     void webserver_handle_stats() {
-      char message[256] = "\0";
+      String message;
       // Don't return stats in startup state, since we won't have a full set of temperature samples yet.
       if (runstate != runstate_startup) {
-        snprintf(message, sizeof(message), "%s\n%d\n%s\n%s\n", 
-          dtostr(last_temp, 1, 1).c_str(), 
-          temp_setting, 
-          pump_running?"1":"0", 
-          dtostr(last_valid_temp, 1, 1).c_str());
+        message += dtostr(last_temp, 1, 1);
+        message += "\n";
+
+        message += temp_setting;
+        message += "\n";
+
+        message += pump_running?"1":"0";
+        message += "\n";
+
+        message += dtostr(last_valid_temp, 1, 1);
+        message += "\n";
       }
       server.send(200, "text/plain; charset=UTF-8", message);
     }
