@@ -16,7 +16,7 @@ At this point, I decided to try and build a full replacement. The challenge I se
 
 <img src="panel-controller.jpeg">
 
-# Input
+## Input
 
 As part of my previous troubleshooting, I had de-soldered the 5V regulator from the board, and I was able to use a multimeter on the dead control board (by checking continuity between the 5V regulator output pads and the connector pins) to determine that two of the wires going to the panel were just +5v and ground. I hooked up the spare panel to power and ground accordingly, and checked the other three wires with my oscilloscope. One of them (the red wire) had a digital signal on it. It was +5V most of the time, with short pulses to 0V. 
 
@@ -46,7 +46,7 @@ Holding down multiple buttons follows the same pattern, so the one-byte report t
 
 With this, the code to read the panel buttons was basically done. Now I had to figure out how to write to the display. 
 
-# Output
+## Output
 
 The display has three seven-segment digits and two LEDs labelled "Heat" and "Filter".
 

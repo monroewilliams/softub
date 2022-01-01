@@ -3,11 +3,7 @@
 This code is intended to interface with the existing Softub control panel and temperature sensors, and behave similarly to the original Softub controller.
 It should be able to directly replace the existing control board with an Arduino and a relay with the appropriate rating.
 
-My initial build is using a [Leonardo clone](https://www.amazon.com/dp/B0786LJQ8K), and one of [these combined relay and 5v power supplies](https://www.amazon.com/dp/B077W1NVLM). Currently I'm planning to use a [prototyping shield](https://www.amazon.com/dp/B00Q9YB7PI) to distribute power and mount plugs for the connections.
-
-I'm planning to mount the relay/supply unit in a [junction box](https://www.homedepot.com/p/Commercial-Electric-1-2-in-Gray-2-Gang-7-Holes-Non-Metallic-Weatherproof-Box-WDB750PG/300851103) with a [blank cover](https://www.homedepot.com/p/Commercial-Electric-Gray-2-Gang-Non-Metallic-Weatherproof-Blank-Cover-WBC200PG/300851669) and some [cable](https://www.homedepot.com/p/3-4-in-Strain-Relief-Cord-Connector-LPCG757-1/100171642) [seals](https://www.homedepot.com/p/Arlington-Industries-1-2-in-Low-Profile-Strain-Relief-Cord-Connector-LPCG507-1/308920052) so that all AC power is isolated from the arduino. 
-
-The Arduino board is mounted in a [separate enclosure with its own cable seals](https://www.amazon.com/dp/B08M3R71ZD).
+Details about the hardware and connections are [here](./hardware/README.md).
 
 ## Current state of the project:
 
@@ -24,19 +20,21 @@ The plug pinout for the panel is:
 
 The temperature sensors seem to be a linear analog sensor, probably an LM34. Supply +5v/ground on the red and blue wires, and read a voltage proportional to temperature back on the green wire. The voltage read times 100 gives the temperature in Farenheit.
 
+The control logic approximates the behavior of the original controller, with a couple of minor tweaks. Holding the temperature up/down buttons will adjust the temperature quickly. There's a "panic" mode if the two sensors go out of agreement or the temperature reading hits 5 degrees above the max allowed setpoint (currently 110 + 5 or 115 degrees), which shuts off the motor and flashes the two temperature readings on the display panel. The user can clear panic mode by holding the "light" and "jets" buttons together for 5 seconds (although if the panic condition is still present it will immediately reenter the panic state).
 
-The control logic approximates the behavior of the original controller, with a couple of minor tweaks. Holding the temperature up/down buttons will adjust the temperature quickly. There's a "panic" mode if the two sensors go out of agreement or the temperature reading goes above 110 degrees farenheit, which shuts off the motor and flashes the two temperature readings on the display panel. The user can clear panic mode by holding the "light" and "jets" buttons together for 5 seconds (although if the panic condition is still present it will immediately reenter the panic state).
+On ESP32, the code can optionally (dependent on `WEBSERVER` being defined) fire up a web server that has several endpoints:
+- `/` -- Human-friendly status page with buttons for temperature up/down and turning the pump on/off manually (buttons are conditional on `WEBSERVER_REMOTE_CONTROL` being defined)
+- `/set` -- Endpoint used to change the temp setting and pump status (conditional on `WEBSERVER_REMOTE_CONTROL` being defined)
+- `/stats` -- Machine-friendly status page that reports current temp, set temp, whether the pump is running, and the last known valid water temp (I use this to build graphs with the scripts shown [here](./graphs/README.md))
+- `/debug` -- Internal data useful for debugging the code (dependent on `WEBSERVER_DEBUG` being defined)
 
-I've also added support for a couple of ESP32-based boards (the [WeMos D1 R32](https://www.amazon.com/gp/product/B07WFZCBH8), which appears to be the same hardware as the [DOIT ESPduino32](https://www.amazon.com/dp/B0775WFN9P), and the [ArduCAM IoTai](https://www.amazon.com/gp/product/B07W8SMFTK)). I've included board definitions and pins file for these in the repository, as the [esp32doit-espduino board definition](https://docs.platformio.org/en/latest/boards/espressif32/esp32doit-espduino.html) built into PlatformIO has a couple of minor issues (mostly that the SPI library expects SCK/MISO/MOSI/SS to be defined, which breaks the build), and I don't see one matching the ArduCAM IoTai at all.
+I've also included an option for using OTA update to update the sketch over the network, since pulling the board out of the pump pod to tweak settings is annoying. This support is conditional on `OTA_UPDATE` being defined.
 
-On ESP32, the code can optionally fire up a web server that reports the current temperature, set temperature, and pump on/off status on one endpoint, and some debug information on another. I'm using this to pull the data onto another machine and build graphs with RRD.
+The SSID/password for the WiFI connection and the OTA update authentication credentials can be set either inline in platformio.ini, or in a separate credentials.ini file (which is in .gitignore to prevent accidentally including them in git commits). See the `[credentials]` section in [platformio.ini](./platformio.ini) for more details on how this works.
 
-I've also included an option for updating the sketch over the network, since pulling the board out of the pump pod to tweak settings is going to be annoying.
+## To-do list
 
-The relay/power supply unit I started with doesn't seem to have quite enough power for the ESP32 when WiFi is enabled -- the board is prone to brown out and reset (which doesn't happen when it's powered via USB). I've switched to a [different power supply](https://www.amazon.com/gp/product/B07V5XP92F) and a separate [single relay module](https://www.amazon.com/gp/product/B07TWH7DZ1), which solve this issue.
+It seems that the temperature reported by the sensors is higher than the actual water temperature (around 10 degrees higher when the water is 100 degrees). I've added a linear interpolation table in the sensor_temp_to_water_temp() function to account for this, but currently the table just offsets by 10 degrees at all temperatures. I expect that the offset will be different at different water temperatures, and I'll need to gather some data on this to calibrate the table at some point (probably the next time I drain and refill the tub, if I have the patience to watch the temperature while it heats...)
 
-Upon installing the board into the Softub pod (which is of course outside my house), I found that the board-trace antenna was not sufficient for it to be able to connect to my house WiFi (even though one of my access points is just inside a wall from the tub, it seems that wall is exceptionally good at attenuating signals for some reason). I was able to fix this by resoldering the extremely tiny jumper on the ArduCAM IoTai board to enable the external antenna connector, and adding a [+8dB antenna and pigtail](https://www.amazon.com/dp/B082SHBWTK) mounted on the outside of the enclosure. 
+I'm considering adding a third LM34 temperature sensor to the shield so that I can also graph the temp at the controller. I'm fairly certain that the temp inside the pod is a lot higher than what the water sensors show (at least while the pump is running), but I'd like to know exactly how much higher. It's possible that this data could feed into the temperature offset, if I can figure out how they're related, and it would probably be prudent to have a thermal shutdown/panic case in the code if it goes too high.
 
-With that change, everything is currently working. I've since also added a debug endpoint that reports some internal info about the code, and an html page at the root which allows the set temperature to be adjusted and the jets to be turned on and off.
-
-There's still a bit of work to do: it seems that the temperature reported by the sensors is higher than the actual water temperature (around 10 degrees higher when the water is 100 degrees). I've currently got an offset baked into the code to account for this, but I expect that the offset will be different at different water temperatures, and I'll need to gather some data on this to calibrate the table in the sensor_temp_to_water_temp() function.
