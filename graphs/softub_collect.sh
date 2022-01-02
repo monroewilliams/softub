@@ -16,7 +16,10 @@ IFS=$'\n' lines=($output)
 #done
 
 # update the database
-if [ ${#lines[@]} -ge 4 ]
+if [ ${#lines[@]} -ge 5 ]
+then
+    $rrdtool update $db --template temp:set:running:validtemp:cputemp "N:${lines[0]}:${lines[1]}:${lines[2]}:${lines[3]}:${lines[4]}"
+elif [ ${#lines[@]} -ge 4 ]
 then
     $rrdtool update $db --template temp:set:running:validtemp "N:${lines[0]}:${lines[1]}:${lines[2]}:${lines[3]}"
 fi

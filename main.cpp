@@ -29,6 +29,80 @@
 void network_start();
 void network_service();
 
+
+//////////////////////////////////////////////////
+// board-specific defines
+#if defined(ARDUINO_AVR_LEONARDO)
+  // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
+  const int pin_pump = 2;
+  const int pin_temp[] = { A5, A4 };
+
+  // Make sure the pins shared with hardware SPI via the shield are high-impedance.
+  #define QUIESCE_PINS \
+    pinMode(13, INPUT); \
+    pinMode(11, INPUT);
+
+  const int OLED_RESET = 10;
+  const int OLED_DC = 9;
+  const int OLED_CS = 8;
+  // The shield has SCK/MOSI broken out from the ICSP header, so we're using hardware SPI.
+#elif defined(ARDUINO_AVR_PROMICRO16)
+  // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
+  const int pin_pump = 2;
+  const int pin_temp[] = { A0, A1 };
+
+  const int OLED_RESET = 5;
+  const int OLED_DC = 6;
+  const int OLED_CS = 7;
+#elif defined(ARDUINO_ARDUCAM_IOTAI) || defined(ARDUINO_ESP32_DEV)
+  const int pin_pump = D2;
+  const int pin_temp[] = { S5, S4 };
+
+  // Make sure the pins shared with hardware SPI via the shield are high-impedance.
+  // The spot for pin 13 is defined as "no connection" on this one
+  #define QUIESCE_PINS \
+    pinMode(D11, INPUT);
+
+  const int PANEL_TX = D4;
+  const int PANEL_RX = D5;
+
+  const int OLED_RESET = D10;
+  const int OLED_DC = D9;
+  const int OLED_CS = D8;
+
+  // TODO: Calibrate the sensor for this board.
+  // This was my first guess. It's definitely incorrect, but it at least lets me graph something.
+  #define TSENS_OFFSET (0)
+  #define TSENS_MULTIPLIER (0.5)
+
+#elif defined(ARDUINO_WEMOS_D1_R32)
+  // SOME pins files for this board ID define the pins using their actual IO line numbers.
+  // The esp32doit-espduino board variant is one of those.
+  const int pin_pump = IO26;
+  const int pin_temp[] = { IO39, IO36 };
+
+  // The TX/RX pins on this board are shared with the USB serial interface, which is problematic.
+  // (Even if we're not using serial debug, the bootloader and other services will send data on these lines sometimes.)
+  // Use the pins that would be assigned to Serial2 by default.
+  // This means the shield pinout needed for this board will be different from the one for the Leonardo. 
+  // I admit defeat.
+  const int PANEL_TX = IO17;
+  const int PANEL_RX = IO16;
+  
+  const int OLED_RESET = IO5;
+  const int OLED_DC = IO13;
+  const int OLED_CS = IO12;
+
+  // From my testing of the WeMos board, it appears that the value in the tsens reg increases by 1 for every ~5 degrees farenheit.
+  // It is 122 at 75 degrees ambient.
+  #define TSENS_OFFSET (-107)
+  #define TSENS_MULTIPLIER (5.0)
+
+#endif
+
+//////////////////////////////////////////////////
+// CPU-architecture-specific defines
+
 #if defined(__AVR__)
   // Watchdog timer support
   #include <avr/wdt.h>
@@ -139,69 +213,24 @@ double readVcc() {
   const int64_t day = 24 * hour;
   const int64_t year = 365 * day;
 
+  // Code for reading the built-in CPU temperature sensor.
+  #if defined(TSENS_OFFSET) && defined(TSENS_MULTIPLIER)
+    #define CPU_TEMP_AVAILABLE
+    extern "C" uint8_t read_tsens_register();
+    float cpu_temp()
+    {
+      uint8_t tsens = read_tsens_register();
+      
+      // Assuming the TSENS reading is actually linear, this should convert it to Farenheit:
+      return (tsens + TSENS_OFFSET) * TSENS_MULTIPLIER;
+    }
+  #endif
+
 #else
   // no watchdog timer support
   void watchdog_init() {}
   void watchdog_start() {}
   void watchdog_reset() {}
-#endif
-
-//////////////////////////////////////////////////
-// board-specific defines
-#if defined(ARDUINO_AVR_LEONARDO)
-  // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
-  const int pin_pump = 2;
-  const int pin_temp[] = { A5, A4 };
-
-  // Make sure the pins shared with hardware SPI via the shield are high-impedance.
-  #define QUIESCE_PINS \
-    pinMode(13, INPUT); \
-    pinMode(11, INPUT);
-
-  const int OLED_RESET = 10;
-  const int OLED_DC = 9;
-  const int OLED_CS = 8;
-  // The shield has SCK/MOSI broken out from the ICSP header, so we're using hardware SPI.
-#elif defined(ARDUINO_AVR_PROMICRO16)
-  // The I/O for the panel must be connected to the Serial1 pins (0 and 1).
-  const int pin_pump = 2;
-  const int pin_temp[] = { A0, A1 };
-
-  const int OLED_RESET = 5;
-  const int OLED_DC = 6;
-  const int OLED_CS = 7;
-#elif defined(ARDUINO_ARDUCAM_IOTAI)
-  const int pin_pump = D2;
-  const int pin_temp[] = { S5, S4 };
-
-  // Make sure the pins shared with hardware SPI via the shield are high-impedance.
-  // The spot for pin 13 is defined as "no connection" on this one
-  #define QUIESCE_PINS \
-    pinMode(D11, INPUT);
-
-  const int PANEL_TX = D4;
-  const int PANEL_RX = D5;
-
-  const int OLED_RESET = D10;
-  const int OLED_DC = D9;
-  const int OLED_CS = D8;
-#elif defined(ARDUINO_WEMOS_D1_R32)
-  // SOME pins files for this board ID define the pins using their actual IO line numbers.
-  // The esp32doit-espduino board variant is one of those.
-  const int pin_pump = IO26;
-  const int pin_temp[] = { IO39, IO36 };
-
-  // The TX/RX pins on this board are shared with the USB serial interface, which is problematic.
-  // (Even if we're not using serial debug, the bootloader and other services will send data on these lines sometimes.)
-  // Use the pins that would be assigned to Serial2 by default.
-  // This means the shield pinout needed for this board will be different from the one for the Leonardo. 
-  // I admit defeat.
-  const int PANEL_TX = IO17;
-  const int PANEL_RX = IO16;
-  
-  const int OLED_RESET = IO5;
-  const int OLED_DC = IO13;
-  const int OLED_CS = IO12;
 #endif
 
 const double ADC_DIVISOR = ADC_AREF_VOLTAGE / double(ADC_RESOLUTION);
@@ -505,15 +534,29 @@ void panic()
   }
 }
 
-double smoothed_sensor_reading(int sensor)
+// Optionally return the lowest/highest readings in the buffer
+double smoothed_sensor_reading(int sensor, int *lowest = NULL, int *highest = NULL)
 {
     if (sensor >= pin_temp_count) {
       sensor = 0;
     }
+    if (lowest != NULL) {
+      *lowest = INT_MAX;
+    }
+    if (highest != NULL) {
+      *highest = INT_MIN;
+    }
 
     double result = 0;
     for (int i = 0; i < temp_sample_count; i++) {
-      result += temp_samples[sensor][i];
+      int sample = temp_samples[sensor][i];
+      result += sample;
+      if (lowest != NULL) {
+          *lowest = min(*lowest, sample);
+      }
+      if (highest != NULL) {
+          *highest = max(*highest, sample);
+      }
     }
     result /= temp_sample_count;
 
@@ -538,18 +581,24 @@ void read_temp_sensors()
 
     // Smooth the temperature sampling over temp_sample_count samples
     double smoothed_value = smoothed_sensor_reading(i);
-    avg_reading += smoothed_value;
+
+    // The first two sensors are the water temperature sensors. Any further ones are auxiliary.
+    if (i < 2) {
+      avg_reading += smoothed_value;
+    }
 
 #if defined(OLED_DISPLAY)
     // dtostr(smoothed_value * ADC_DIVISOR, 1, 3);    
-    print_oled(i + 1, "%s (%d)", 
-      dtostr(adc_to_farenheit(smoothed_value), 1, 1).c_str(),
-      value);
+    print_oled(i + 1, "%s(%s/%d)"
+      , dtostr(adc_to_farenheit(smoothed_value), 1, 1).c_str()
+      , dtostr(adc_to_farenheit(value), 1, 1).c_str()
+      , value
+      );
 #endif
   }
 
-  // Calculate the average smoothed temp and save it.
-  avg_reading /= pin_temp_count;
+  // Calculate the average smoothed temp of the first two sensors and save it as the water temp.
+  avg_reading /= 2;
   last_temp = sensor_temp_to_water_temp(adc_to_farenheit(avg_reading));
 
   // If the smoothed readings from sensors 0 and 1 ever differ by more than panic_sensor_difference degrees, panic.
@@ -977,6 +1026,11 @@ void loop() {
   // Always update the display of vcc.
   display_vcc();
 
+  // Display the internal CPU temperature.
+  #if defined(CPU_TEMP_AVAILABLE)
+    print_oled(5, "CPU temp:%s", dtostr(cpu_temp(), 1, 1));
+  #endif
+
   display_send();
 
   network_service();
@@ -1030,6 +1084,13 @@ void loop() {
 
         message += dtostr(last_valid_temp, 1, 1);
         message += "\n";
+
+        #if defined(CPU_TEMP_AVAILABLE)
+          // This is the internal temperature sensor on the CPU.
+          message += dtostr(cpu_temp(), 1, 1);
+          message += "\n";
+        #endif
+
       }
       server.send(200, "text/plain; charset=UTF-8", message);
     }
@@ -1237,15 +1298,34 @@ void loop() {
 
       for (int i = 0; i < pin_temp_count; i++)
       {
-        // Replicate the temperature sample reporting that goes on the OLED.
+        // Replicate the temperature sample reporting that goes on the OLED, 
+        // plus min and max values from the smoothing buffer.
         int last_sample = temp_samples[i][temp_sample_pointer];
-        double smoothed_farenheit = adc_to_farenheit(smoothed_sensor_reading(i));
+        int lowest, highest;
+        double smoothed = smoothed_sensor_reading(i, &lowest, &highest);
         message += "Sensor ";
         message += i;
-        message += ": ";
-        message += dtostr(smoothed_farenheit, 1, 1);
-        message += "°F (";
+
+        message += ": smoothed = ";
+        message += dtostr(adc_to_farenheit(smoothed), 1, 1);
+        message += " (";
+        message += dtostr(smoothed, 1, 1);
+
+        message += "), cur = ";
+        message += dtostr(adc_to_farenheit(last_sample), 1, 1);
+        message += " (";
         message += last_sample;
+    
+        message += "), min = ";
+        message += dtostr(adc_to_farenheit(lowest), 1, 1);
+        message += " (";
+        message += lowest;
+    
+        message += "), max = ";
+        message += dtostr(adc_to_farenheit(highest), 1, 1);
+        message += " (";
+        message += highest;
+
         message += ")\n";
       }
 
@@ -1260,6 +1340,17 @@ void loop() {
       message += "Last valid temp: ";
       message += dtostr(last_valid_temp, 1, 1);
       message += "\n";
+
+      #if defined(CPU_TEMP_AVAILABLE)
+      {
+        uint8_t tsens = read_tsens_register();
+        message += "CPU temp: ";
+        message += dtostr((tsens + TSENS_OFFSET) * TSENS_MULTIPLIER, 1, 1);
+        message += " (";
+        message += tsens;
+        message += ")\n";
+      }
+      #endif
 
       // Display http arguments:
       int arg_count = server.args();

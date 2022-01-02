@@ -30,12 +30,14 @@ $rrdtool graph ${SITE}/softub_${DURATION}.png \
 DEF:rawTemp=${db}:temp:AVERAGE \
 DEF:rawSet=${db}:set:AVERAGE \
 DEF:rawValidtemp=${db}:validtemp:AVERAGE \
+DEF:rawCPUtemp=${db}:cputemp:AVERAGE \
 DEF:running=${db}:running:AVERAGE \
 CDEF:minTemp=running,DUP,-,${MIN_TEMP},+ \
 CDEF:dutyCycleSpace=running,DUP,-,${DUTY_CYCLE_SPACE},+ \
 CDEF:temp=rawTemp,minTemp,INF,LIMIT \
 CDEF:set=rawSet,minTemp,INF,LIMIT \
 CDEF:validtemp=rawValidtemp,minTemp,INF,LIMIT \
+CDEF:cputemp=rawCPUtemp,minTemp,INF,LIMIT \
 VDEF:tempMax=temp,MAXIMUM \
 VDEF:setMax=set,MAXIMUM \
 VDEF:validMax=validtemp,MAXIMUM \
@@ -49,6 +51,7 @@ CDEF:dutyCycle=running,dutyCycleHeight,*,dutyCycleBottom,+ \
 CDEF:stackValidTemp=validtemp,minTemp,- \
 LINE3:set#ff7f00be:"Temperature Setting" \
 LINE1:temp#00be00:"Measured Temperature" \
+LINE1:cputemp#000000:"CPU Temperature" \
 LINE1:minTemp#bebebe: \
 AREA:stackValidTemp#3f3fff7f:"Water Temperature":STACK \
 LINE1:dutyCycle#ff0000:"Pump" \
