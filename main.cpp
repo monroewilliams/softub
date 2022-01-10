@@ -56,7 +56,7 @@ void network_service();
   const int OLED_CS = 7;
 #elif defined(ARDUINO_ARDUCAM_IOTAI) || defined(ARDUINO_ESP32_DEV)
   const int pin_pump = D2;
-  const int pin_temp[] = { S5, S4 };
+  const int pin_temp[] = { S5, S4, S3 };
 
   // Make sure the pins shared with hardware SPI via the shield are high-impedance.
   // The spot for pin 13 is defined as "no connection" on this one
@@ -70,10 +70,8 @@ void network_service();
   const int OLED_DC = D9;
   const int OLED_CS = D8;
 
-  // TODO: Calibrate the sensor for this board.
-  // This was my first guess. It's definitely incorrect, but it at least lets me graph something.
-  #define TSENS_OFFSET (0)
-  #define TSENS_MULTIPLIER (0.5)
+  #define TSENS_OFFSET (-113)
+  #define TSENS_MULTIPLIER (4.0)
 
 #elif defined(ARDUINO_WEMOS_D1_R32)
   // SOME pins files for this board ID define the pins using their actual IO line numbers.
@@ -199,11 +197,24 @@ double readVcc() {
   // The voltage attenuation defaults to ADC_11db, which scales it by a factor of 1/3.6.
   // const double ADC_AREF_VOLTAGE = 1.1 * 3.6;
 
-  // Reducing the scaling factor a bit gives us more usable resolution.
-  // I don't want to use ADC_0db, as this would max out at 1.1 = 110 degrees F, which we could realistically see.
-  // ADC_2_5db scales the voltage by 1/1.34 and gives us a range up to 1.47 = 147 degrees F, which is high enough.
-  #define ADC_ATTENUATION_FACTOR ADC_2_5db
-  const double ADC_AREF_VOLTAGE = 1.1 * 1.34;
+  // Reducing the attenuation factor a bit gives us more usable resolution.
+  // ADC_0db provides no attenuation, so we measure 0 - 1.1v
+  // ADC_2_5db provides attenuation of 1/1.34, so we measure 0 - 1.47v
+  // ADC_6db provides an attenuation of 1/2 , so we measure 0 - 2.2v
+  // ADC_11db provides an attenuation of 1/3.6, so we measure 0 - 3.96v
+
+  // From comments in the adc.h header: 
+  // Due to ADC characteristics, most accurate results are obtained within the following approximate voltage ranges:
+  // - 0dB attenuaton (ADC_ATTEN_DB_0) between 100 and 950mV
+  // - 2.5dB attenuation (ADC_ATTEN_DB_2_5) between 100 and 1250mV
+  // - 6dB attenuation (ADC_ATTEN_DB_6) between 150 to 1750mV
+  // - 11dB attenuation (ADC_ATTEN_DB_11) between 150 to 2450mV
+
+  // I don't want to use ADC_0db, as this is only accurage to 0.95v and maxes out at 1.1 = 110 degrees F, which we could see.
+  // It's possible that the temperature sensor in the pod would approach 125 degrees, which is the edge of the accurate range for 2.5dB.
+  // 6dB should be accurate up to 1.75v = 175 degrees F, which should give us ample headroom.
+  #define ADC_ATTENUATION_FACTOR ADC_6db
+  const double ADC_AREF_VOLTAGE = 1.1 * 2.0;
 
   // Handy constants for interpreting esp_timer_get_time()
   const int64_t millisecond = 1000l;
@@ -445,46 +456,6 @@ void temp_adjust(int amount)
   temp_adjusted = true;
   temp_adjusted_millis = millis();  
 }
-double sensor_temp_to_water_temp(double sensor_f)
-{
-  // On my tub, the temperature sensor reading is consistently offset from the actual water temp.
-  // Near 100 degrees it reads 10 degrees high. 
-  // This function does a linear interpoation using this table to map sensor temperature to actual water temp.
-  // I haven't yet characterized the offset at other temperatures, but I assume it won't be constant.
-  // FIXME: acually calibrate this.
-  // Left column is sensor temp, right column is water temp.
-  const double temp_table[][2] = 
-  {
-    { 0, 0 - 10 },
-    { 50, 50 - 10 }, 
-    { 60, 60 - 10 }, 
-    { 70, 70 - 10 }, 
-    { 80, 80 - 10 }, 
-    { 90, 90 - 10 }, 
-    { 100, 100 - 10 }, 
-    { 110, 110 - 10 }, 
-    { 120, 120 - 10 },
-    { 130, 130 - 10 },
-    { 140, 140 - 10 },
-    // Max possible temperature reading, just to set an approximate slope above the expected range.
-    { ADC_AREF_VOLTAGE * 100, (ADC_AREF_VOLTAGE * 100) - 10 }
-  };
-  const int temp_table_size = sizeof(temp_table) / sizeof(temp_table[0]);
-
-  for (int i = 1; i < temp_table_size; i++)
-  {
-    if (sensor_f < temp_table[i][0]) {
-      // Linear interpolate between entries in the table.
-      double raw = sensor_f - temp_table[i-1][0];
-      double raw_segment = temp_table[i][0] - temp_table[i-1][0];
-      double degrees_segment = temp_table[i][1] - temp_table[i-1][1];
-      return ((raw * degrees_segment) / raw_segment) + temp_table[i-1][1];
-    }
-  }
-  
-  // Return a value which will definitely cause a panic.
-  return 1000.0;
-}
 
 double adc_to_farenheit(double reading)
 {
@@ -574,7 +545,15 @@ void read_temp_sensors()
   double avg_reading = 0;
   for (int i = 0; i < pin_temp_count; i++)
   {
+#ifdef ARDUINO_ARCH_ESP32
+    // Use the calibrated API to read actual voltage in millivolts
+    uint32_t mv = analogReadMilliVolts(pin_temp[i]);
+    // Convert it to our defined range.
+    // The entire right-hand multiplier here is just constant values, so it should be computed at compile-time.
+    int value = double(mv) * ((1.0 / ADC_AREF_VOLTAGE) * (ADC_RESOLUTION / 1000.0));
+#else
     int value = analogRead(pin_temp[i]);
+#endif
 
     // Save the current sample in the ring buffer
     temp_samples[i][temp_sample_pointer] = value;
@@ -599,7 +578,7 @@ void read_temp_sensors()
 
   // Calculate the average smoothed temp of the first two sensors and save it as the water temp.
   avg_reading /= 2;
-  last_temp = sensor_temp_to_water_temp(adc_to_farenheit(avg_reading));
+  last_temp = adc_to_farenheit(avg_reading);
 
   // If the smoothed readings from sensors 0 and 1 ever differ by more than panic_sensor_difference degrees, panic.
   if (fabs(adc_to_farenheit(smoothed_sensor_reading(0)) - adc_to_farenheit(smoothed_sensor_reading(1))) > panic_sensor_difference)
@@ -1085,10 +1064,18 @@ void loop() {
         message += dtostr(last_valid_temp, 1, 1);
         message += "\n";
 
+        if (pin_temp_count > 2)
+        {
+          // The third temperature sensor is on the shield, use that as the cpu temp.
+          message += dtostr(adc_to_farenheit(smoothed_sensor_reading(2)), 1, 1);
+          message += "\n";
+        }
         #if defined(CPU_TEMP_AVAILABLE)
+        else {
           // This is the internal temperature sensor on the CPU.
           message += dtostr(cpu_temp(), 1, 1);
           message += "\n";
+        }
         #endif
 
       }
@@ -1344,7 +1331,7 @@ void loop() {
       #if defined(CPU_TEMP_AVAILABLE)
       {
         uint8_t tsens = read_tsens_register();
-        message += "CPU temp: ";
+        message += "CPU temp sensor: ";
         message += dtostr((tsens + TSENS_OFFSET) * TSENS_MULTIPLIER, 1, 1);
         message += " (";
         message += tsens;
