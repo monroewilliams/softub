@@ -173,6 +173,14 @@ double readVcc() {
   return 1125.300 / adc; // Calculate Vcc (in V); 1125.300 = 1.1*1023
 }
 
+uint64_t micros64() {
+    return micros();
+}
+
+uint64_t millis64() {
+    return millis();
+}
+
 #elif defined(ARDUINO_ARCH_ESP32)
   // Watchdog timer support
   #include <esp_task_wdt.h>
@@ -223,6 +231,17 @@ double readVcc() {
   const int64_t hour = 60 * minute;
   const int64_t day = 24 * hour;
   const int64_t year = 365 * day;
+
+  // 64 bit versions of micros() and millis().
+  // The 32 bit versions roll over at ~1.2 seconds and ~50 days, respectively.
+  // By going to 64 bits, we get something like 5000 centuries and  and 5 million centuries, which should be sufficent.
+  uint64_t micros64() {
+      return esp_timer_get_time();
+  }
+
+  uint64_t millis64() {
+      return esp_timer_get_time() / millisecond;
+  }
 
   // Code for reading the built-in CPU temperature sensor.
   #if defined(TSENS_OFFSET) && defined(TSENS_MULTIPLIER)
@@ -369,10 +388,10 @@ const int temp_min = 50;
 const int temp_max = 110;
 
 // The time of the last transition. This may be used differently by different states.
-uint32_t runstate_last_transition_millis = 0;
+uint64_t runstate_last_transition_millis = 0;
 
 // The time of the last change to buttons pressed. This may be used differently by different states.
-uint32_t buttons_last_transition_millis = 0;
+uint64_t buttons_last_transition_millis = 0;
 
 // The last temperature reading we took
 double last_temp = 0;
@@ -381,21 +400,21 @@ double last_valid_temp = 0;
 
 // Used to display temperature for a short time after the user adjusts it
 bool temp_adjusted = false;
-uint32_t temp_adjusted_millis = 0;
-const uint32_t temp_adjusted_display_millis = 5 * 1000l;
+uint64_t temp_adjusted_millis = 0;
+const uint64_t temp_adjusted_display_millis = 5 * 1000l;
 
 // The amount of time to wait on startup before doing anything
-const uint32_t startup_wait_seconds = 10;
+const uint64_t startup_wait_seconds = 10;
 // The amount of time we run the pump before believing the temperature reading
-const uint32_t temp_settle_millis = 30 * 1000l; // 30 seconds
+const uint64_t temp_settle_millis = 30 * 1000l; // 30 seconds
 // The amount of time after stopping the pump when we no longer consider the temp valid.
-const uint32_t temp_decay_millis = 60 * 1000l; // 60 seconds
+const uint64_t temp_decay_millis = 60 * 1000l; // 60 seconds
 // The amount of time in the idle state after which we should run to check the temperature.
-const uint32_t idle_seconds = 15 * 60;  // 15 minutes
+const uint64_t idle_seconds = 15 * 60;  // 15 minutes
 // When the user turns on the pump manually, run it for this long.
-const uint32_t manual_pump_seconds = 15 * 60; // 15 minutes
+const uint64_t manual_pump_seconds = 15 * 60; // 15 minutes
 // The amount of time the user has to hold buttons to escape panic state
-const uint32_t panic_wait_seconds = 5;
+const uint64_t panic_wait_seconds = 5;
 // If smoothed readings ever disagree by this many degrees f, panic.
 const int panic_sensor_difference = 10;
 // If the temperature reading ever the max set temperature plus 5 degrees f, panic.
@@ -419,13 +438,13 @@ const int32_t display_bytes = sizeof(display_buffer) / sizeof(display_buffer[0])
 bool display_dirty = true;
 
 // loop no faster than 16Hz
-const uint32_t loop_microseconds = 1000000l / 16;
+const uint64_t loop_microseconds = 1000000l / 16;
 
 uint32_t buttons = 0;
 uint32_t last_buttons = 0;
 
 bool pump_running = false;
-uint32_t pump_switch_millis = 0;
+uint64_t pump_switch_millis = 0;
 bool temp_valid = false;
 
 int temp_setting = 100;
@@ -454,7 +473,7 @@ void temp_adjust(int amount)
   if (temp_setting < temp_min)
     temp_setting = temp_min;
   temp_adjusted = true;
-  temp_adjusted_millis = millis();  
+  temp_adjusted_millis = millis64();  
 }
 
 double adc_to_farenheit(double reading)
@@ -470,7 +489,7 @@ double adc_to_farenheit(double reading)
 
 void runstate_transition()
 {
-  runstate_last_transition_millis = millis();
+  runstate_last_transition_millis = millis64();
 }
 
 const char* state_name(int state)
@@ -715,7 +734,7 @@ void set_pump(bool running)
     display_filter(running);
     digitalWrite(pin_pump, running);
     pump_running = running;
-    pump_switch_millis = millis();
+    pump_switch_millis = millis64();
   }
 }
 
@@ -769,7 +788,7 @@ void check_temp_validity()
   // and consider the temp valid for a short time after it turns off.
   if (pump_running && !temp_valid)
   {
-    if (millis() - pump_switch_millis > temp_settle_millis)
+    if (millis64() - pump_switch_millis > temp_settle_millis)
     {
       // The pump has been running long enough for temp to be valid.
       temp_valid = true;
@@ -777,7 +796,7 @@ void check_temp_validity()
   }
   else if (!pump_running && temp_valid)
   {
-    if (millis() - pump_switch_millis > temp_decay_millis)
+    if (millis64() - pump_switch_millis > temp_decay_millis)
     {
         // The pump has been off long enough that we should no longer consider the temp valid.
       temp_valid = false;
@@ -791,11 +810,11 @@ void check_temp_validity()
 }
 
 // Make this a global so it can be displayed by the debug web endpoint
-uint32_t loop_time = 0;
+uint64_t loop_time = 0;
 
 void loop() {
-  uint32_t loop_start_micros = micros();
-  uint32_t loop_start_millis = millis();
+  uint64_t loop_start_micros = micros64();
+  uint64_t loop_start_millis = millis64();
   
   read_temp_sensors();
 
@@ -846,14 +865,14 @@ void loop() {
   }
 
   // Useful timing shortcuts for the state machine
-  uint32_t millis_since_last_transition = loop_start_millis - runstate_last_transition_millis;
-  uint32_t seconds_since_last_transition = millis_since_last_transition / 1000l;
-  uint32_t millis_since_button_change = loop_start_millis - buttons_last_transition_millis;
-  uint32_t seconds_since_button_change = millis_since_button_change / 1000l;
+  uint64_t millis_since_last_transition = loop_start_millis - runstate_last_transition_millis;
+  uint64_t seconds_since_last_transition = millis_since_last_transition / 1000l;
+  uint64_t millis_since_button_change = loop_start_millis - buttons_last_transition_millis;
+  uint64_t seconds_since_button_change = millis_since_button_change / 1000l;
 
   if (temp_adjusted)
   {
-    uint32_t millis_since_temp_adjust = millis() - temp_adjusted_millis;
+    uint64_t millis_since_temp_adjust = millis64() - temp_adjusted_millis;
 
     // See if the temp-adjusted display window has expired.
     if (millis_since_temp_adjust  > temp_adjusted_display_millis)
@@ -868,7 +887,7 @@ void loop() {
         // If the user has been holding down the up or down button since the last temp adjustment,
         // and the last temp adjustment was over the repeat time (1/2s for the first adjustment, 1/4s for the next 1.5 seconds, 1/10s thereafter), 
         // adjust again.
-        uint32_t repeat_time = 500;
+        uint64_t repeat_time = 500;
         if (millis_since_button_change > 2000) {
           repeat_time = 100;
         } else if (millis_since_button_change > 500) {
@@ -1014,10 +1033,10 @@ void loop() {
 
   network_service();
 
-  loop_time = micros() - loop_start_micros;
+  loop_time = micros64() - loop_start_micros;
   if (loop_time < loop_microseconds)
   {
-    uint32_t msRemaining = loop_microseconds - loop_time;
+    uint64_t msRemaining = loop_microseconds - loop_time;
     // debug("loop time %ld, start %ld, remaining %ld", loop_time, loop_start_micros, msRemaining);
 #if defined(__AVR__)
     // On AVR, delayMicroseconds takes an int (16 bits), so it won't work properly if the delay time is over 65535ms
@@ -1265,9 +1284,9 @@ void loop() {
 
       // Last loop time
       message += "Last loop time: ";
-      message += loop_time;
+      message += uint32_t(loop_time);
       message += "/";
-      message += loop_microseconds;
+      message += uint32_t(loop_microseconds);
       message += " microseconds\n";
 
       message += "WiFI RSSI: ";
