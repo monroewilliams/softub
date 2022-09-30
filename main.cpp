@@ -1569,7 +1569,7 @@ void network_service()
       case WL_CONNECT_FAILED:
       case WL_CONNECTION_LOST:
       case WL_DISCONNECTED:
-        if (interval > minute)
+        if (interval > (second * 15))
         {
           // We've been disconnected long enough, try reconnecting.
           // Consider this a status change, so we don't spam it.
@@ -1577,7 +1577,10 @@ void network_service()
           print_oled(3, "WiFi reconnect");
           debug("WiFi reconnect");
           WiFi.disconnect();
-          WiFi.reconnect();
+          // WiFi.reconnect();
+          // I've seen reports that reconnect() doesn't work reliably, and using begin() works better.
+          // ref: https://github.com/espressif/arduino-esp32/issues/653#issuecomment-572387806
+          WiFi.begin();
         }
       break;
       default:
