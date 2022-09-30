@@ -458,7 +458,7 @@ enum {
   button_down = 0x08,
 };
 
-String dtostr(double number, signed char width, unsigned char prec) 
+String dtostr(double number, signed char width = 1, unsigned char prec = 1) 
 {
   char buf[32];
   dtostrf(number, width, prec, buf);
@@ -588,8 +588,8 @@ void read_temp_sensors()
 #if defined(OLED_DISPLAY)
     // dtostr(smoothed_value * ADC_DIVISOR, 1, 3);    
     print_oled(i + 1, "%s(%s/%d)"
-      , dtostr(adc_to_farenheit(smoothed_value), 1, 1).c_str()
-      , dtostr(adc_to_farenheit(value), 1, 1).c_str()
+      , dtostr(adc_to_farenheit(smoothed_value)).c_str()
+      , dtostr(adc_to_farenheit(value)).c_str()
       , value
       );
 #endif
@@ -1026,7 +1026,7 @@ void loop() {
 
   // Display the internal CPU temperature.
   #if defined(CPU_TEMP_AVAILABLE)
-    print_oled(5, "CPU temp:%s", dtostr(cpu_temp(), 1, 1));
+    print_oled(5, "CPU temp:%s", dtostr(cpu_temp()));
   #endif
 
   display_send();
@@ -1071,7 +1071,7 @@ void loop() {
       String message;
       // Don't return stats in startup state, since we won't have a full set of temperature samples yet.
       if (runstate != runstate_startup) {
-        message += dtostr(last_temp, 1, 1);
+        message += dtostr(last_temp);
         message += "\n";
 
         message += temp_setting;
@@ -1080,19 +1080,19 @@ void loop() {
         message += pump_running?"1":"0";
         message += "\n";
 
-        message += dtostr(last_valid_temp, 1, 1);
+        message += dtostr(last_valid_temp);
         message += "\n";
 
         if (pin_temp_count > 2)
         {
           // The third temperature sensor is on the shield, use that as the cpu temp.
-          message += dtostr(adc_to_farenheit(smoothed_sensor_reading(2)), 1, 1);
+          message += dtostr(adc_to_farenheit(smoothed_sensor_reading(2)));
           message += "\n";
         }
         #if defined(CPU_TEMP_AVAILABLE)
         else {
           // This is the internal temperature sensor on the CPU.
-          message += dtostr(cpu_temp(), 1, 1);
+          message += dtostr(cpu_temp());
           message += "\n";
         }
         #endif
@@ -1123,7 +1123,7 @@ void loop() {
       message += state_name(runstate);
       message += "</p>\n";
       message += "<p>Current Temp: ";
-      message +=  dtostr(last_temp, 1, 1);
+      message +=  dtostr(last_temp);
       message += "</p>\n";
       message += "<p>Temp Setting: ";
       message += temp_setting;
@@ -1321,22 +1321,22 @@ void loop() {
         message += i;
 
         message += ": smoothed = ";
-        message += dtostr(adc_to_farenheit(smoothed), 1, 1);
+        message += dtostr(adc_to_farenheit(smoothed));
         message += " (";
-        message += dtostr(smoothed, 1, 1);
+        message += dtostr(smoothed);
 
         message += "), cur = ";
-        message += dtostr(adc_to_farenheit(last_sample), 1, 1);
+        message += dtostr(adc_to_farenheit(last_sample));
         message += " (";
         message += last_sample;
     
         message += "), min = ";
-        message += dtostr(adc_to_farenheit(lowest), 1, 1);
+        message += dtostr(adc_to_farenheit(lowest));
         message += " (";
         message += lowest;
     
         message += "), max = ";
-        message += dtostr(adc_to_farenheit(highest), 1, 1);
+        message += dtostr(adc_to_farenheit(highest));
         message += " (";
         message += highest;
 
@@ -1348,18 +1348,18 @@ void loop() {
       message += "\n";
 
       message += "Last temp: ";
-      message += dtostr(last_temp, 1, 1);
+      message += dtostr(last_temp);
       message += "\n";
 
       message += "Last valid temp: ";
-      message += dtostr(last_valid_temp, 1, 1);
+      message += dtostr(last_valid_temp);
       message += "\n";
 
       #if defined(CPU_TEMP_AVAILABLE)
       {
         uint8_t tsens = read_tsens_register();
         message += "CPU temp sensor: ";
-        message += dtostr((tsens + TSENS_OFFSET) * TSENS_MULTIPLIER, 1, 1);
+        message += dtostr((tsens + TSENS_OFFSET) * TSENS_MULTIPLIER);
         message += " (";
         message += tsens;
         message += ")\n";
