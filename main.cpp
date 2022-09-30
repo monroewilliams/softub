@@ -1130,8 +1130,16 @@ void loop() {
       message += "</p>\n";
 
       #if defined(WEBSERVER_REMOTE_CONTROL)
-        message += "<p><a href=\"/set?temp=up\"><button class=\"button\">Temp up</button></a></p>\n";
-        message += "<p><a href=\"/set?temp=down\"><button class=\"button\">Temp down</button></a></p>\n";
+        if (temp_setting < temp_max) {
+          message += "<p><a href=\"/set?temp=";
+          message += temp_setting + 1;
+          message += "\"><button class=\"button\">Temp up</button></a></p>\n";
+        }
+        if (temp_setting > temp_min) {
+          message += "<p><a href=\"/set?temp=";
+          message += temp_setting - 1;
+          message += "\"><button class=\"button\">Temp down</button></a></p>\n";
+        }
         switch (runstate) {
           case runstate_idle:
             message += "<p><a href=\"/set?jets=on\"><button class=\"button\">Jets on</button></a></p>\n";
