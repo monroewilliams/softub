@@ -423,6 +423,8 @@ const int panic_high_temp = temp_max + 5;
 // Used to flash things in panic mode
 bool panic_flash;
 
+String panic_string;
+
 /////////////////////////////////////////////////
 // other globals
 const int pin_temp_count = sizeof(pin_temp) / sizeof(pin_temp[0]);
@@ -524,6 +526,17 @@ void panic()
   }
 }
 
+void panic(const char *format, ...)
+{
+  char string[1024];
+  va_list arg;
+  va_start(arg, format);
+  vsnprintf(string, sizeof(string), format, arg);
+
+  panic_string = String(string);
+  panic();
+}
+
 // Optionally return the lowest/highest readings in the buffer
 double smoothed_sensor_reading(int sensor, int *lowest = NULL, int *highest = NULL)
 {
@@ -602,13 +615,17 @@ void read_temp_sensors()
   // If the smoothed readings from sensors 0 and 1 ever differ by more than panic_sensor_difference degrees, panic.
   if (fabs(adc_to_farenheit(smoothed_sensor_reading(0)) - adc_to_farenheit(smoothed_sensor_reading(1))) > panic_sensor_difference)
   {
-    panic();
+    panic("sensor readings diverged (%s vs %s)",
+      dtostr(adc_to_farenheit(smoothed_sensor_reading(0))).c_str(),
+      dtostr(adc_to_farenheit(smoothed_sensor_reading(1))).c_str());
   }
   
   // If calculated temperature is over our defined limit, panic.
   if (last_temp > panic_high_temp) 
   {
-    panic();
+    panic("last_temp too high (%s > %d)", 
+      dtostr(last_temp).c_str(),
+      panic_high_temp);
   }
 
   // Reset the watchdog timer.
@@ -1365,6 +1382,14 @@ void loop() {
         message += ")\n";
       }
       #endif
+
+      // Display panic string
+      if (panic_string.length() > 0)
+      {
+          message += "Panic string: ";
+          message += panic_string;
+          message += "\n";
+      }
 
       // Display http arguments:
       int arg_count = server.args();
