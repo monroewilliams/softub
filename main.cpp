@@ -1248,6 +1248,14 @@ void loop() {
       server.sendHeader("Location", "/", false);
       server.send(303, "text/html; charset=UTF-8", message);
     }
+
+    void webserver_handle_reboot() {
+      String message;
+      message += "Rebooting in 5 seconds...\n";
+      server.send(200, "text/plain; charset=UTF-8", message);
+      delay(5 * 1000);
+      ESP.restart();
+    }
   #endif
 
     const char *reset_reason()
@@ -1511,6 +1519,7 @@ void network_service()
           #endif
           #if defined(WEBSERVER_REMOTE_CONTROL)
             server.on("/set", webserver_handle_set);
+            server.on("/reboot", webserver_handle_reboot);
           #endif
 
           server.onNotFound(webserver_handle_not_found);
