@@ -186,11 +186,11 @@ uint64_t millis64() {
   #include <esp_task_wdt.h>
   void watchdog_init() {
     // Start with the watchdog timer disabled
-    esp_task_wdt_init(2, false);
+    esp_task_wdt_init(15, false);
   }
   void watchdog_start() {
     // Start the watchdog timer watching this task
-    esp_task_wdt_init(2, true);
+    esp_task_wdt_init(15, true);
     esp_task_wdt_add(NULL);
   }
   void watchdog_reset() {
