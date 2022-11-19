@@ -412,7 +412,7 @@ const uint64_t temp_decay_millis = 60 * 1000l; // 60 seconds
 // The amount of time in the idle state after which we should run to check the temperature.
 const uint64_t idle_seconds = 15 * 60;  // 15 minutes
 // When the user turns on the pump manually, run it for this long.
-const uint64_t manual_pump_seconds = 15 * 60; // 15 minutes
+const uint64_t manual_pump_seconds = 5 * 60; // 5 minutes
 // The amount of time the user has to hold buttons to escape panic state
 const uint64_t panic_wait_seconds = 5;
 // If smoothed readings ever disagree by this many degrees f, panic.
@@ -996,6 +996,9 @@ void loop() {
       if (jets_pushed) {
         // From the manual state, allow the user to turn off the pump.
         enter_state(runstate_idle);
+      } else if (seconds_since_last_transition > manual_pump_seconds) {
+        // Don't let the manual mode run for too long.
+        enter_state(runstate_finding_temp);
       } else {
         set_pump(true);
       }
